@@ -770,7 +770,7 @@ void (null as unknown as MemorySource);
 // lint:audit op —— 确定性自查(重复主题/陈旧/孤儿页),agent 依结果维护。
 // ---------------------------------------------------------------------------
 
-describe('memory 工具 audit（ lint,假 store）', () => {
+describe('memory 工具 audit（lint,假 store）', () => {
   const now = Date.now();
   const day = 86_400_000;
   const entry = (overrides: Partial<MemoryEntry>): MemoryEntry =>

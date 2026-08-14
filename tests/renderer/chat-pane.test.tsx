@@ -71,7 +71,7 @@ describe('ChatPane 消息气泡 markdown 渲染策略', () => {
     expect(link).not.toHaveAttribute('href');
   });
 
-  it('Given assistant 消息含 GFM 表格 When 渲染 Then 转成语义 table（  remark-gfm 必须启用）', () => {
+  it('Given assistant 消息含 GFM 表格 When 渲染 Then 转成语义 table（remark-gfm 必须启用）', () => {
     renderChat({
       events: [
         messageEvent(
@@ -500,7 +500,7 @@ describe('ChatPane 内联连续流', () => {
     expect(screen.queryByText(/3分25秒/)).not.toBeInTheDocument();
   });
 
-  it('Given tool.blocked When 渲染 Then blocked 行默认展开且 safetyNote 可见( )', () => {
+  it('Given tool.blocked When 渲染 Then blocked 行默认展开且 safetyNote 可见()', () => {
     const blocked: AgentEvent = {
       type: 'tool.blocked',
       sessionId: 's1',

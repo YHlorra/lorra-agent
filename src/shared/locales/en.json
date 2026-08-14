@@ -316,7 +316,7 @@
   "memory.edit.contentField": "Content",
   "memory.edit.kindField": "Category",
   "memory.edit.basisField": "Basis (optional)",
-  "memory.edit.note": "Evidence level “{evidence}” and scope cannot be changed ( / scope inherited).",
+  "memory.edit.note": "Evidence level “{evidence}” and scope cannot be changed (/ scope inherited).",
   "memory.edit.cancel": "Cancel",
   "memory.edit.save": "Save",
   "providers.rail.navLabel": "Configuration",

@@ -128,7 +128,7 @@ describe('lorra.settings.get/set(语言真源)', () => {
   });
 });
 
-describe('lorra.settings compileModel（ 语义清洗模型）', () => {
+describe('lorra.settings compileModel（语义清洗模型）', () => {
   let userdata: string;
   const settingsPath = () => path.join(userdata, 'settings.json');
 
@@ -208,7 +208,7 @@ describe('lorra.settings compileModel（ 语义清洗模型）', () => {
   });
 });
 
-describe('lorra.settings dataSources（ 数据源开关）', () => {
+describe('lorra.settings dataSources（数据源开关）', () => {
   let userdata: string;
 
   beforeEach(() => {

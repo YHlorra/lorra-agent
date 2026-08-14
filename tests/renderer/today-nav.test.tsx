@@ -163,7 +163,7 @@ describe('Requirement: 今日页导航(app-shell spec)', () => {
   });
 });
 
-describe('Requirement: 记忆页导航(app-shell spec, 6.9)', () => {
+describe('Requirement: 记忆页导航(app-shell spec,6.9)', () => {
   it('Scenario 导航四态扩展为五态:路由可解析 memory 态并渲染记忆整页', async () => {
     useAppStore.setState({ page: 'memory' });
     render(<App />);

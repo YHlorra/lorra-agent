@@ -316,7 +316,7 @@
   "memory.edit.contentField": "内容",
   "memory.edit.kindField": "类别",
   "memory.edit.basisField": "依据(可选)",
-  "memory.edit.note": "证据等级「{evidence}」与范围不可更改( / scope 继承)。",
+  "memory.edit.note": "证据等级「{evidence}」与范围不可更改(/ scope 继承)。",
   "memory.edit.cancel": "取消",
   "memory.edit.save": "保存",
   "providers.rail.navLabel": "配置导航",

@@ -6,39 +6,57 @@ import type { SerializedResult } from '../../shared/result';
 import { toLorraError } from '../../shared/result';
 import { localDateString, type TodayDayData } from '../memory/day-summary';
 import { summarizeOfkDay } from '../ofk/day-aggregate';
-import { ensureDayCompiled, readDayDigestSegments, type SegmentSpec } from '../ofk/day-digest';
+import { createCompileScheduler } from '../ofk/compile-scheduler';
+import {
+  compileDay,
+  dayDigestStaleGroups,
+  readDayDigestSegments,
+  type SegmentSpec,
+} from '../ofk/day-digest';
 import { listDayConceptFiles, readConcept } from '../ofk/ofk-bundle';
 import { syncWorkspaceSessions } from '../ofk/session-sync';
 
 /**
- * 今日页事实查询 IPC(step 5 + P4 step 7):三层架构第三层直读 OFK。
- * 每次调用:
- * 1. 冷路径全量同步(syncWorkspaceSessions,共享模块):遍历工作区会话目录下
- * 每个 *.jsonl → syncSessionFile(清洗 → 写 OFK 概念;内容相同 diff-skip)。
- * 坏文件 Err 记 console.error,fail-open 不中断。
- * 2. 数据源插件:loadPlugins + 按 dataSources 开关启用的内置
- * 适配器 → 逐个 collect → writeSessionConcept(落盘概念,聚合自然包含)。
- * 插件不进热路径(无 lorra 驱动事件,仅冷路径全量)。
+ * 今日页事实查询 IPC(step 5 + P4 step 7 + S6 后台编译):三层架构第三层
+ * 直读 OFK。每次调用:
+ * 1. 冷路径增量同步(syncWorkspaceSessions,共享模块):记账比对 + 只处理
+ * 变化的文件(pi 会话 jsonl + 插件/内置数据源)。坏文件 Err 记
+ * console.error,fail-open 不中断。
+ * 2. stale 判定(纯本地读)后后台调度编译(plan S6/D5):页面**永不等待 LLM**,
+ * 立即返回现有数据;编译完成经 'lorra.today.dayCompiled' 推送请求方
+ * WebContents 刷新(页面已关 → isDestroyed 守卫跳过)。编译失败不推送,
+ * 页面数据不受影响。
  * 3. 读当日全部会话概念(sessions 下 /<YYYY>/<dateISO>/ 的 *.md)→ 解析
  * (解析失败跳过)→ summarizeOfkDay 聚合(含 categories 大类分区)。
  * 不再触碰 facts.db(纯增量,不依赖活跃 driver,原始 jsonl 全程只读)。
  */
+
+// 编译只从今日页入口与 review-assembler 入口触发;不在热同步/冷同步路径调度。
+const compileScheduler = createCompileScheduler({ compileDay });
+
 export function registerTodayHandlers(): void {
   ipcMain.handle(
     'lorra.today.getDayFacts',
-    async (_event, args?: { dateISO?: string }): Promise<SerializedResult<TodayDayData>> => {
+    async (event, args?: { dateISO?: string }): Promise<SerializedResult<TodayDayData>> => {
       try {
         const dateISO = args?.dateISO ?? localDateString(new Date());
 
         // 冷路径:pi 会话 jsonl → 插件/内置数据源 → OFK 概念(fail-open)
         await syncWorkspaceSessions();
 
-        // 触发当日 LLM 编译(分类/分段写回;失败不阻断——现有数据照常返回)
+        // 后台编译调度(plan S6/D5):stale 判定快(纯本地),编译异步防抖;
+        // 数据过期 → 立即返回现有数据 + 编译完成后推送请求页面刷新。
         try {
-          const compiled = await ensureDayCompiled(dateISO);
-          if (compiled.isErr()) console.error('[today-ipc] day compile failed:', compiled.error);
+          const stale = await dayDigestStaleGroups(dateISO);
+          if (stale.isOk() && stale.value.length > 0) {
+            compileScheduler.schedule(dateISO, () => {
+              if (!event.sender.isDestroyed()) {
+                event.sender.send('lorra.today.dayCompiled', { dateISO });
+              }
+            });
+          }
         } catch (cause) {
-          console.error('[today-ipc] day compile threw:', cause);
+          console.error('[today-ipc] day compile schedule failed:', cause);
         }
 
         // 直读 bundle:当日概念

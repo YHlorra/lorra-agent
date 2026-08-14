@@ -310,7 +310,7 @@ export function createMemoryTool(deps: MemoryToolDeps): MemoryTool {
     name: MEMORY_TOOL_NAME,
     label: '记忆维护',
     description:
-      '记忆维护工具（memory）：propose 记一条新记忆（直落生效）/ update 就地更新已有记忆（supersedes 链）/ retire 撤销过时记忆 / search 检索已记住内容（含证据标注）/ audit 周期性自查（矛盾/陈旧/孤儿页， lint）。',
+      '记忆维护工具（memory）：propose 记一条新记忆（直落生效）/ update 就地更新已有记忆（supersedes 链）/ retire 撤销过时记忆 / search 检索已记住内容（含证据标注）/ audit 周期性自查（矛盾/陈旧/孤儿页，lint）。',
     promptSnippet:
       '记忆维护（memory）：propose 记住用户规则/偏好/经验/结论, update 就地更新已有记忆, retire 撤销过时记忆, search 检索已记住内容, audit 自查记忆健康度',
     promptGuidelines: [

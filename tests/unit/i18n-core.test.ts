@@ -11,7 +11,7 @@ vi.mock('../../src/shared/locales/en.json', () => ({
 
 import { type MessageKey, translate } from '../../src/shared/i18n-core';
 
-describe('translate( i18n 核心)', () => {
+describe('translate(i18n 核心)', () => {
   it('zh 取中文字条', () => {
     expect(translate('zh', 'nav.workspace')).toBe('工作台');
     expect(translate('zh', 'settings.groups.appearance')).toBe('外观');

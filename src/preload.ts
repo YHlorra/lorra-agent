@@ -343,6 +343,15 @@ const lorra = {
         dateISO,
       })) as SerializedResult<TodayDayData>;
     },
+    // S6:后台编译完成推送(今日页打开时数据过期 → 编译完成自动刷新);
+    // 返回退订函数(removeListener)。
+    onDayCompiled: (cb: () => void) => {
+      const handler = () => cb();
+      ipcRenderer.on('lorra.today.dayCompiled', handler);
+      return () => {
+        ipcRenderer.removeListener('lorra.today.dayCompiled', handler);
+      };
+    },
   },
   review: {
     generate: async (args: GenerateArgs) => {

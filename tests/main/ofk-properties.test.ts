@@ -21,7 +21,7 @@ import { makeFact } from './ofk-test-fixtures';
  * - P4 ofkRef 形态:64 位 hex 迁移指针恒合法;含 .. 段的串恒非法。
  */
 
-describe('OFK 属性( 不变量)', () => {
+describe('OFK 属性(不变量)', () => {
   it('P1 round-trip: 概念文档关键字段无损往返', () => {
     // 标题:yamlStr 契约 = trim 后序列化 → 生成器限定 trim 稳定、无换行(概念标题真源即如此)
     const title = fc

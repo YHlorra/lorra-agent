@@ -25,15 +25,17 @@ vi.mock('electron', () => ({
   },
 }));
 
-// Step 6:getDayFacts 内触发 ensureDayCompiled —— mock 掉真实编译(真实实现会
-// 走模型调用,测试环境无 auth 且慢);缺省成功 no-op,失败不阻断由专门用例验证。
-// readDayDigestSegments 同样 stub(空 Map),避免测试依赖真实日摘要文件。
+// S6:getDayFacts 内做 stale 判定 + 后台调度编译 —— mock 掉真实编译(真实实现会
+// 走模型调用,测试环境无 auth 且慢);缺省 stale 空(不调度),编译成功/失败由
+// 专门用例验证。readDayDigestSegments 同样 stub(空 Map),避免测试依赖真实日摘要文件。
 const dayDigestMock = vi.hoisted(() => ({
-  ensureDayCompiled: vi.fn(),
+  dayDigestStaleGroups: vi.fn(),
+  compileDay: vi.fn(),
   readDayDigestSegments: vi.fn(),
 }));
 vi.mock('../../src/main/ofk/day-digest', () => ({
-  ensureDayCompiled: dayDigestMock.ensureDayCompiled,
+  dayDigestStaleGroups: dayDigestMock.dayDigestStaleGroups,
+  compileDay: dayDigestMock.compileDay,
   readDayDigestSegments: dayDigestMock.readDayDigestSegments,
 }));
 
@@ -93,11 +95,21 @@ function okValue(res: DayFactsResponse): TodayDayData {
   throw new Error(`expected ok, got ${res.error.code}`);
 }
 
+/** S6:handler 现用 event.sender 推送编译完成事件 → 假 event 携带可断言的 send。 */
+function makeFakeEvent() {
+  return {
+    sender: {
+      isDestroyed: () => false,
+      send: vi.fn(),
+    },
+  };
+}
+
 async function getDayFacts(dateISO: string = DAY) {
   const handler = electronMock.handlers.get('lorra.today.getDayFacts');
   expect(handler).toBeDefined();
   if (!handler) throw new Error('handler missing');
-  const res = (await handler(null, { dateISO })) as DayFactsResponse;
+  const res = (await handler(makeFakeEvent(), { dateISO })) as DayFactsResponse;
   expect(res.status).toBe('ok');
   return okValue(res);
 }
@@ -114,8 +126,10 @@ describe('today-ipc getDayFacts（OFK bundle 直读）', () => {
     wsRealB = mkdtempSync(path.join(tmpdir(), 'lorra-ws-real-b-'));
     vi.stubEnv('LORRA_E2E_USERDATA', userdata);
     electronMock.handlers.clear();
-    dayDigestMock.ensureDayCompiled.mockReset();
-    dayDigestMock.ensureDayCompiled.mockResolvedValue(ok()); // 缺省成功 no-op
+    dayDigestMock.dayDigestStaleGroups.mockReset();
+    dayDigestMock.dayDigestStaleGroups.mockResolvedValue(ok([])); // 缺省无 stale → 不调度
+    dayDigestMock.compileDay.mockReset();
+    dayDigestMock.compileDay.mockResolvedValue(ok()); // 缺省成功 no-op(仅 stale 时触发)
     dayDigestMock.readDayDigestSegments.mockReset();
     dayDigestMock.readDayDigestSegments.mockResolvedValue(ok(new Map())); // 缺省无 LLM 段
     registerTodayHandlers();
@@ -221,7 +235,7 @@ describe('today-ipc getDayFacts（OFK bundle 直读）', () => {
     const handler = electronMock.handlers.get('lorra.today.getDayFacts');
     expect(handler).toBeDefined();
     if (!handler) throw new Error('handler missing');
-    const res = (await handler(null)) as DayFactsResponse;
+    const res = (await handler(makeFakeEvent())) as DayFactsResponse;
     expect(res.status).toBe('ok');
     const value = okValue(res);
     expect(value.facts.map((f) => f.sessionRef)).toEqual(['sess-today-default']);
@@ -267,38 +281,94 @@ describe('today-ipc getDayFacts（OFK bundle 直读）', () => {
     expect(day.categories[0].totalActiveMs).toBe(day.stats.totalActiveMs);
   });
 
-  it('Step 6: getDayFacts 每次触发 ensureDayCompiled(dateISO) 一次', async () => {
+  it('S6: stale 空 → 只判 stale,不调度编译(compileDay 永不调用)', async () => {
     seedSession('ws-encoded-a', 'sess-real-a', wsRealA);
 
     await getDayFacts();
-    expect(dayDigestMock.ensureDayCompiled).toHaveBeenCalledTimes(1);
-    expect(dayDigestMock.ensureDayCompiled).toHaveBeenCalledWith(DAY);
+    expect(dayDigestMock.dayDigestStaleGroups).toHaveBeenCalledWith(DAY);
+    expect(dayDigestMock.compileDay).not.toHaveBeenCalled();
 
-    // 日期参数透传:查 2026-08-09 时以该日触发编译
+    // 日期参数透传:查 2026-08-09 时以该日判 stale
     await getDayFacts('2026-08-09');
-    expect(dayDigestMock.ensureDayCompiled).toHaveBeenCalledTimes(2);
-    expect(dayDigestMock.ensureDayCompiled).toHaveBeenLastCalledWith('2026-08-09');
+    expect(dayDigestMock.dayDigestStaleGroups).toHaveBeenLastCalledWith('2026-08-09');
+    expect(dayDigestMock.compileDay).not.toHaveBeenCalled();
   });
 
-  it('Step 6: 编译失败(Err)不阻断 getDayFacts(仍返回 ok,现有数据照常)', async () => {
+  it('S6: stale 非空 → 页面立即返回数据;编译完成后推送 dayCompiled 给请求 sender', async () => {
     seedSession('ws-encoded-a', 'sess-real-a', wsRealA);
-    dayDigestMock.ensureDayCompiled.mockResolvedValue(
+    dayDigestMock.dayDigestStaleGroups.mockResolvedValue(
+      ok([{ slug: 'C--work-demo', concepts: [] }]),
+    );
+    const event = makeFakeEvent();
+
+    vi.useFakeTimers();
+    try {
+      const handler = electronMock.handlers.get('lorra.today.getDayFacts');
+      expect(handler).toBeDefined();
+      if (!handler) throw new Error('handler missing');
+      const res = (await handler(event, { dateISO: DAY })) as DayFactsResponse;
+      expect(res.status).toBe('ok'); // 页面数据不等待编译
+      expect(okValue(res).stats.sessionCount).toBe(1);
+      expect(dayDigestMock.compileDay).not.toHaveBeenCalled(); // 防抖期内未编译
+
+      await vi.advanceTimersByTimeAsync(5_000); // 防抖到期 → 编译 → 推送
+      expect(dayDigestMock.compileDay).toHaveBeenCalledWith(DAY);
+      expect(event.sender.send).toHaveBeenCalledWith('lorra.today.dayCompiled', { dateISO: DAY });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('S6: compileDay Err → 不推送(fail-open),页面数据照常', async () => {
+    seedSession('ws-encoded-a', 'sess-real-a', wsRealA);
+    dayDigestMock.dayDigestStaleGroups.mockResolvedValue(
+      ok([{ slug: 'C--work-demo', concepts: [] }]),
+    );
+    dayDigestMock.compileDay.mockResolvedValue(
       err({ code: 'model-unavailable', message: 'no model' }),
     );
+    const event = makeFakeEvent();
 
-    const day = await getDayFacts();
-    expect(dayDigestMock.ensureDayCompiled).toHaveBeenCalledTimes(1);
-    expect(day.facts.map((f) => f.sessionRef)).toEqual(['sess-real-a']);
-    expect(day.stats.sessionCount).toBe(1);
+    vi.useFakeTimers();
+    try {
+      const handler = electronMock.handlers.get('lorra.today.getDayFacts');
+      expect(handler).toBeDefined();
+      if (!handler) throw new Error('handler missing');
+      const res = (await handler(event, { dateISO: DAY })) as DayFactsResponse;
+      expect(res.status).toBe('ok');
+      expect(okValue(res).stats.sessionCount).toBe(1);
+
+      await vi.advanceTimersByTimeAsync(5_000);
+      expect(dayDigestMock.compileDay).toHaveBeenCalledTimes(1);
+      expect(event.sender.send).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
-  it('Step 6: 编译抛出(reject)同样不阻断 getDayFacts', async () => {
+  it('S6: 编译抛出(reject)同样不阻断 getDayFacts,不推送', async () => {
     seedSession('ws-encoded-a', 'sess-real-a', wsRealA);
-    dayDigestMock.ensureDayCompiled.mockRejectedValue(new Error('compile crashed'));
+    dayDigestMock.dayDigestStaleGroups.mockResolvedValue(
+      ok([{ slug: 'C--work-demo', concepts: [] }]),
+    );
+    dayDigestMock.compileDay.mockRejectedValue(new Error('compile crashed'));
+    const event = makeFakeEvent();
 
-    const day = await getDayFacts();
-    expect(dayDigestMock.ensureDayCompiled).toHaveBeenCalledTimes(1);
-    expect(day.facts.map((f) => f.sessionRef)).toEqual(['sess-real-a']);
+    vi.useFakeTimers();
+    try {
+      const handler = electronMock.handlers.get('lorra.today.getDayFacts');
+      expect(handler).toBeDefined();
+      if (!handler) throw new Error('handler missing');
+      const res = (await handler(event, { dateISO: DAY })) as DayFactsResponse;
+      expect(res.status).toBe('ok');
+      expect(okValue(res).stats.sessionCount).toBe(1);
+
+      await vi.advanceTimersByTimeAsync(5_000);
+      expect(dayDigestMock.compileDay).toHaveBeenCalledTimes(1);
+      expect(event.sender.send).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 
@@ -315,8 +385,10 @@ describe('today-ipc 数据源插件并入（）', () => {
     vi.spyOn(os, 'homedir').mockReturnValue(home);
     electronMock.userData = userdata; // settings.json 位于 userData 根(settings 真源)
     electronMock.handlers.clear();
-    dayDigestMock.ensureDayCompiled.mockReset();
-    dayDigestMock.ensureDayCompiled.mockResolvedValue(ok());
+    dayDigestMock.dayDigestStaleGroups.mockReset();
+    dayDigestMock.dayDigestStaleGroups.mockResolvedValue(ok([])); // 缺省无 stale → 不调度
+    dayDigestMock.compileDay.mockReset();
+    dayDigestMock.compileDay.mockResolvedValue(ok());
     dayDigestMock.readDayDigestSegments.mockReset();
     dayDigestMock.readDayDigestSegments.mockResolvedValue(ok(new Map()));
     registerTodayHandlers();

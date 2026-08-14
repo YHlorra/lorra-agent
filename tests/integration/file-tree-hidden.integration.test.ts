@@ -18,7 +18,7 @@ import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { clearPathRegistry, readTree, workspaceRootId } from '../../src/main/fs/path-resolve';
 
-describe('readTree 默认包含隐藏项( )', () => {
+describe('readTree 默认包含隐藏项()', () => {
   let root: string;
   beforeEach(async () => {
     root = await mkdtemp(path.join(tmpdir(), 'lorra-iso-'));

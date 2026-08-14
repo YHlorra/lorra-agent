@@ -245,6 +245,8 @@ interface LorraTodayApi {
   getDayFacts(
     dateISO?: string,
   ): Promise<import('./shared/result').SerializedResult<TodayDayDataDto>>;
+  /** S6:后台摘要编译完成推送(数据过期打开今日页 → 编译完成自动刷新);返回退订函数。 */
+  onDayCompiled(cb: () => void): () => void;
 }
 
 // ── 复盘引擎(review-rail / review-modal)──

@@ -54,6 +54,10 @@ Prerequisite: Node >= 22.19, npm (`package-lock.json` v3; no other package manag
 | `npm run test:watch` | `vitest` watch mode |
 | `npm run test:e2e` | `playwright test` — requires built bundle `.vite/build/main.js` first |
 | `npx vitest run <file…>` | Targeted tests (space-separated file list) |
+| `npx vitest run --config scripts/coverage-<side>.vitest.config.ts --coverage` | Coverage run (per-side config) |
+| `scripts/gauntlet-ofk.cmd` / `scripts/gauntlet-skills.cmd` | Fail-closed evidence gates: typecheck → baseline → biome → mutation → residual scan → e2e |
+
+No CI pipeline exists — run the gauntlets locally before release.
 
 ## License
 

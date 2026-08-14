@@ -16,7 +16,7 @@ import { describe, expect, it } from 'vitest';
 
 import { lorraConfigDir } from '../../src/main/pi-sdk-driver/lorra-config-dir';
 
-describe('测试隔离守卫()', () => {
+describe('测试隔离守卫(PROB-020)', () => {
   it('LORRA_E2E_USERDATA 在测试文件加载前已被强制指向临时目录', () => {
     const v = process.env.LORRA_E2E_USERDATA;
     expect(v).toBeDefined();

@@ -394,11 +394,15 @@ export function TodayPage({ onBack, onOpenSession }: TodayPageProps): JSX.Elemen
   }, [refresh, dateISO]);
 
   // 页面实时性(审查 #5):会话活动事件 / visibilitychange 回前台 → 防抖重取,
-  // 进行中会话时长增长可见。只读投影测试断言的是「挂载时 1 次调用」,事件触发增量不受影响。
+  // 进行中会话时长增长可见。S6 增:后台编译完成推送(lorra.today.dayCompiled)
+  // → 同款防抖重取(编译完成的大类分区/分段自动出现)。只读投影测试断言的是
+  // 「挂载时 1 次调用」,事件触发增量不受影响。
   useEffect(() => {
     let unsubscribe: (() => void) | undefined;
+    let unsubscribeDayCompiled: (() => void) | undefined;
     try {
       unsubscribe = window.lorra?.events?.subscribe(() => scheduleRefresh());
+      unsubscribeDayCompiled = window.lorra?.today?.onDayCompiled?.(() => scheduleRefresh());
     } catch {
       // 事件通道不可用时退化为仅 visibilitychange。
     }
@@ -409,6 +413,7 @@ export function TodayPage({ onBack, onOpenSession }: TodayPageProps): JSX.Elemen
     return () => {
       try {
         unsubscribe?.();
+        unsubscribeDayCompiled?.();
       } catch {
         // noop
       }

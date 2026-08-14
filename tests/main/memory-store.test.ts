@@ -792,7 +792,7 @@ describe('getSharedMemoryStore（共享单例）', () => {
 // 提取产物 → 找既有 knowledge 页就地 update,而非盲目新增。
 // ---------------------------------------------------------------------------
 
-describe('compileMatch( ingest 编译匹配)', () => {
+describe('compileMatch(ingest 编译匹配)', () => {
   it('标题命中:提取标题与既有页一致 → 返回该页', () => {
     const store = openStore(mkdtempSync(path.join(tmpdir(), 'lorra-cm-')));
     const existing = expectOk(
@@ -898,7 +898,7 @@ describe('compileMatch( ingest 编译匹配)', () => {
 // (active + scope 过滤,上限 MEMORY_RECALL_HOP_MAX),返回形状仍为数组。
 // ---------------------------------------------------------------------------
 
-describe(' 自动关联 + 一跳检索', () => {
+describe('自动关联 + 一跳检索', () => {
   let dir: string;
   let store: MemoryStore;
   const params = { scope: 'workspace' as const, workspace: 'C:\\work\\demo' };
@@ -1084,7 +1084,7 @@ describe(' 自动关联 + 一跳检索', () => {
     vi.useRealTimers();
   });
 
-  it('recall 无链 → 行为与  完全一致(仅 hits,无关联追加)', () => {
+  it('recall 无链 → 行为与 完全一致(仅 hits,无关联追加)', () => {
     vi.useFakeTimers();
     vi.setSystemTime(1_700_000_000_000);
     const b = expectOk(
@@ -1124,7 +1124,7 @@ describe(' 自动关联 + 一跳检索', () => {
     expect(corpus.map((c) => c.kind)).toEqual([...MEMORY_KINDS]);
   });
 
-  it('linkRelated 跨 kind: 经验页 → 偏好页/知识页均可建边( 图谱)', () => {
+  it('linkRelated 跨 kind: 经验页 → 偏好页/知识页均可建边(图谱)', () => {
     const experience = expectOk(
       store.propose(
         makePropose({ kind: 'procedural_experience', title: '回测必须含滑点', content: 'x' }),

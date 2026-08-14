@@ -503,7 +503,7 @@ describe('MemoryPage(6.12 knowledge 链接)', () => {
 // 不在记忆页提供显式「喂素材」入口;digest IPC 能力保留在对话侧/未来入口。
 // ---------------------------------------------------------------------------
 
-describe('查看文档（ ofkRef）', () => {
+describe('查看文档（ofkRef）', () => {
   it('带 ofkRef 的条目显示「查看文档」;点击后渲染文档视图,返回条切回', async () => {
     const fx = makeFixture();
     fx.active[0].ofkRef = '/memory/e1.md';

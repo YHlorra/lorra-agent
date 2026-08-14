@@ -181,12 +181,16 @@ export function errToday(
 // ---------------------------------------------------------------------------
 
 export interface TodayLorraMock extends LorraMock {
-  today: { getDayFacts: Mock };
+  today: { getDayFacts: Mock; onDayCompiled: Mock };
 }
 
 export function makeTodayLorraMock(): TodayLorraMock {
   const m = makeLorraMock() as TodayLorraMock;
-  m.today = { getDayFacts: vi.fn() };
+  m.today = {
+    getDayFacts: vi.fn(),
+    // S6:订阅返回退订函数(组件 cleanup 调);回调由测试用例手动触发。
+    onDayCompiled: vi.fn(() => () => {}),
+  };
   return m;
 }
 

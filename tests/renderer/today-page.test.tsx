@@ -40,7 +40,7 @@
  * data-testid="review-rail-fallback" 复盘栏降级占位(错误边界兜底,PM 需求①隔离)
  * 悬停详情以 role="tooltip" 承载。
  */
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { ReactElement } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -859,6 +859,26 @@ describe('PM 需求②: 日历日期选择', () => {
     await user.click(screen.getByTestId('today-date-label'));
     await user.click(document.body); // 外部点击
     expect(screen.queryByTestId('today-calendar')).not.toBeInTheDocument();
+  });
+
+  it('S6: 收到 onDayCompiled 回调 → 防抖后触发一次 getDayFacts 重取(编译完成自动刷新)', async () => {
+    mock.today.getDayFacts.mockResolvedValue(okToday(makeDayData()));
+    render(<TodayPage />);
+    await screen.findAllByTestId('today-block');
+    expect(mock.today.getDayFacts).toHaveBeenCalledTimes(1); // 挂载 1 次
+
+    // 组件挂载时已订阅 onDayCompiled(回调 = scheduleRefresh)
+    expect(mock.today.onDayCompiled).toHaveBeenCalledTimes(1);
+    const notify = mock.today.onDayCompiled.mock.calls[0][0] as () => void;
+    expect(notify).toBeTypeOf('function');
+
+    act(() => notify()); // 主进程推送编译完成
+    expect(mock.today.getDayFacts).toHaveBeenCalledTimes(1); // 防抖期内未重取
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 1600)); // REFRESH_DEBOUNCE_MS=1500
+    });
+    expect(mock.today.getDayFacts).toHaveBeenCalledTimes(2);
+    await screen.findAllByTestId('today-block'); // 重取后数据仍渲染
   });
 
   it('日期语义:日历选非今天 → 无 now-line、unfinished 块高度按 activeMs(不延伸);今天行为不变', async () => {

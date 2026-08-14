@@ -67,7 +67,7 @@ export const PLUGIN_TEMPLATE_PLUGIN_JSON = `{
 }
 `;
 
-export const PLUGIN_TEMPLATE_INDEX_MJS = `// 数据源插件模板( 契约)
+export const PLUGIN_TEMPLATE_INDEX_MJS = `// 数据源插件模板(契约)
 // collect 必须返回 PluginFact[](纯 JSON 对象数组):
 //   Omit<SessionFact, 'factId'|'schemaVersion'|'collector'|'runtime'|'agentId'>
 // 必需字段: sessionRef / scope / summaryRef / privacy / workspace /

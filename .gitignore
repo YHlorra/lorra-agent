@@ -50,23 +50,7 @@ skills-lock.json
 # Private — never push to public
 .workbuddy/
 .beads/
-Problems.md
+
 IDEAS.md
 CLAUDE.md
 PRD.md
-
-# Internal / agent config — never in public
-docs/
-openspec/
-adr/
-AGENTS.md
-DESIGN.md
-GLOSSARY.md
-spec.md
-design-previews/
-ui-design/
-shots/
-.claude/
-.codex/
-.opencode/
-scripts/

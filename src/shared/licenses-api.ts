@@ -6,7 +6,7 @@
 
 export const LICENSES_CHANNEL = 'lorra.app.licenses';
 
-/** 单个开源项目条目(构建期生成)。 */
+/** 单个开源项目条目(构建期由 scripts/generate-licenses.mjs 生成)。 */
 export interface OpenSourceProject {
   name: string;
   version: string;
