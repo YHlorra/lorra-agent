@@ -1,0 +1,1 @@
+{"type":"message","id":"n1","parentId":null,"timestamp":"2026-08-08T13:00:00.000Z","message":{"role":"user","content":[{"type":"text","text":"orphan message without a session header"}]}}

@@ -1,0 +1,72 @@
+.codegraph/
+.omc/
+node_modules/
+dist/
+.env
+.env.*
+!.env.example
+
+# Build artifacts
+.vite/
+out/
+test-results/
+electron-stderr.log
+electron-stdout.log
+
+# Deepwork state (kept readable via .ignore)
+.slim/
+
+# Python cache (not a Python project)
+.pytest_cache/
+
+# Beads / Dolt files (added by bd init)
+.dolt/
+*.db
+.beads-credential-key
+.beads/proxieddb/
+
+# Stale worktree dir (locked by quark, safe to delete on reboot)
+connect-pi-sdk-runtime/
+# bd worktree
+fix-markdown-local-images/
+
+# Claude Code local settings (per-platform, not project-wide)
+.claude/settings.local.json
+.smoke/
+# bd worktree
+chat-window-redesign/
+docs/codex/
+docs/pi-gui/
+docs/pi/
+docs/dsh/
+hermes/
+# bd worktree
+settings-i18n/
+
+# 技能收集产物(第三方技能 junction 内容与环境元数据,不入库)
+.agents/skills/
+.claude/skills/
+skills-lock.json
+# Private — never push to public
+.workbuddy/
+.beads/
+Problems.md
+IDEAS.md
+CLAUDE.md
+PRD.md
+
+# Internal / agent config — never in public
+docs/
+openspec/
+adr/
+AGENTS.md
+DESIGN.md
+GLOSSARY.md
+spec.md
+design-previews/
+ui-design/
+shots/
+.claude/
+.codex/
+.opencode/
+scripts/

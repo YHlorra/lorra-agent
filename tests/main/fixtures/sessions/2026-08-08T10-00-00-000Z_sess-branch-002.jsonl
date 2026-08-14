@@ -1,0 +1,6 @@
+{"type":"session","version":3,"id":"sess-branch-002","timestamp":"2026-08-08T10:00:00.000Z","cwd":"C:\\work\\demo"}
+{"type":"message","id":"b1","parentId":null,"timestamp":"2026-08-08T10:00:10.000Z","message":{"role":"user","content":[{"type":"text","text":"Initial approach: refactor the module"}]}}
+{"type":"message","id":"b2","parentId":"b1","timestamp":"2026-08-08T10:00:50.000Z","message":{"role":"assistant","content":[{"type":"text","text":"OK, exploring the module."}]}}
+{"type":"model_change","id":"bc1","parentId":"b2","timestamp":"2026-08-08T10:01:00.000Z","provider":"anthropic","modelId":"claude-sonnet"}
+{"type":"message","id":"b3","parentId":"b1","timestamp":"2026-08-08T10:05:00.000Z","message":{"role":"user","content":[{"type":"text","text":"Actually, pivot to the caching strategy instead. TODO: drop the old cache keys"}]}}
+{"type":"message","id":"b4","parentId":"b3","timestamp":"2026-08-08T10:05:30.000Z","message":{"role":"assistant","content":[{"type":"text","text":"Caching it is. Done."}]}}

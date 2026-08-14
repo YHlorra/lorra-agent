@@ -1,0 +1,4 @@
+{"type":"session","version":3,"id":"sess-unfinished-004","timestamp":"2026-08-08T09:29:00.000Z","cwd":"C:\\work\\demo"}
+{"type":"message","id":"u1","parentId":null,"timestamp":"2026-08-08T09:30:00.000Z","message":{"role":"user","content":[{"type":"text","text":"Can you add a retry loop? TODO: handle rate limits"}]}}
+{"type":"message","id":"u2","parentId":"u1","timestamp":"2026-08-08T09:30:20.000Z","message":{"role":"assistant","content":[{"type":"text","text":"On it."}]}}
+{"type":"message","id":"u3","parentId":"u2","timestamp":"2026-08-08T09:31:00.000Z","message":{"role":"user","content":[{"type":"text","text":"Also bump the timeout to 30s"}]}}

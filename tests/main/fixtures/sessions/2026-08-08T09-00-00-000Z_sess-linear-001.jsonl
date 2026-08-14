@@ -1,0 +1,4 @@
+{"type":"session","version":3,"id":"sess-linear-001","timestamp":"2026-08-08T09:00:00.000Z","cwd":"C:\\work\\demo"}
+{"type":"message","id":"m1","parentId":null,"timestamp":"2026-08-08T09:00:05.000Z","message":{"role":"user","content":[{"type":"text","text":"Fix the flaky login test"}]}}
+{"type":"message","id":"m2","parentId":"m1","timestamp":"2026-08-08T09:00:40.000Z","message":{"role":"assistant","content":[{"type":"text","text":"Let me look at the test file."}]}}
+{"type":"message","id":"m3","parentId":"m2","timestamp":"2026-08-08T09:01:10.000Z","message":{"role":"assistant","content":[{"type":"text","text":"Found it — the mock was not reset."}]}}

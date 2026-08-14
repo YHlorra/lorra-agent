@@ -1,0 +1,14 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Kami 紙 视觉真源 = styles.css :root 的 rgb 三元组 token(--accent/--muted/…)。
+ 本文件只承载 Tailwind 指令 + body 字体,不再声明任何同名 CSS 变量:
+ 此前的 shadcn 备份块(--accent: #eef2f7 等十六进制)在打包顺序上晚于
+ styles.css,同优先级覆盖了真 token,导致 rgb(var(--accent)) 解析为非法值
+ → 浅色模式发送按钮白底白字(2026-08-13 修复,备份块无任何组件消费)。 */
+
+/* 衬线气质主字体:与 styles.css --font-serif 同源(单一事实源,字体文件打包另做) */
+body {
+  font-family: var(--font-serif);
+}
