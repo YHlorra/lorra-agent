@@ -9,7 +9,11 @@
 </p>
 
 <p align="center">
-[![License][license-badge]][license-url] [![Version][version-badge]][version-url] [![CI][ci-badge]][ci-url] [![Stars][stars-badge]][stars-url] [![Issues][issues-badge]][issues-url]
+  <a href="https://github.com/YHlorra/lorra-agent/blob/main/LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/License-MIT-yellow.svg"></a>
+  <a href="https://github.com/YHlorra/lorra-agent"><img alt="Version" src="https://img.shields.io/badge/version-2.0.0-6c5ce7.svg"></a>
+  <a href="https://github.com/YHlorra/lorra-agent/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/YHlorra/lorra-agent/actions/workflows/ci.yml/badge.svg"></a>
+  <a href="https://github.com/YHlorra/lorra-agent/stargazers"><img alt="Stars" src="https://img.shields.io/github/stars/YHlorra/lorra-agent.svg?style=social"></a>
+  <a href="https://github.com/YHlorra/lorra-agent/issues"><img alt="Issues" src="https://img.shields.io/github/issues/YHlorra/lorra-agent.svg"></a>
 </p>
 
 ---
@@ -23,7 +27,6 @@
 - [架构总览](#how-it-fits-together)
 - [开发命令](#development-commands)
 - [测试](#testing)
-- [AI 编码代理配置](#ai-coding-agent-setup)
 - [安全](#security)
 - [许可证](#license)
 - [Star 历史](#star-history)
@@ -117,14 +120,6 @@ npm start
 
 CI 在每次推送到 `main` 时运行（GitHub Actions，`windows-latest`）：typecheck → lint → 单元/组件测试 → bundle 构建 → 真实 Electron e2e（隔离 profile）→ Squirrel 安装器。
 
-<a id="ai-coding-agent-setup"></a>
-
-## AI 编码代理配置
-
-> [!NOTE]
-> 该仓库当前未内置代理指令文件 / MCP 配置 / skills 目录。
-> <!-- TODO: 如后续提供 AI 编码代理（Claude Code / Codex 等）接入配置，在此补充说明 -->
-
 <a id="security"></a>
 
 ## 安全
@@ -140,7 +135,9 @@ CI 在每次推送到 `main` 时运行（GitHub Actions，`windows-latest`）：
 
 ## 许可证
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://github.com/YHlorra/lorra-agent/blob/main/LICENSE)
+<p>
+  <a href="https://github.com/YHlorra/lorra-agent/blob/main/LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/License-MIT-yellow.svg"></a>
+</p>
 
 基于 [MIT License](https://github.com/YHlorra/lorra-agent/blob/main/LICENSE) 发布。Copyright (c) 2026 YHlorra。
 
@@ -149,14 +146,3 @@ CI 在每次推送到 `main` 时运行（GitHub Actions，`windows-latest`）：
 ## Star 历史
 
 [![Star History Chart](https://api.star-history.com/svg?repos=YHlorra/lorra-agent&type=Date)](https://star-history.com/#YHlorra/lorra-agent&Date)
-
-[license-badge]: https://img.shields.io/badge/License-MIT-yellow.svg
-[license-url]: https://github.com/YHlorra/lorra-agent/blob/main/LICENSE
-[version-badge]: https://img.shields.io/badge/version-2.0.0-6c5ce7.svg
-[version-url]: https://github.com/YHlorra/lorra-agent
-[ci-badge]: https://github.com/YHlorra/lorra-agent/actions/workflows/ci.yml/badge.svg
-[ci-url]: https://github.com/YHlorra/lorra-agent/actions/workflows/ci.yml
-[stars-badge]: https://img.shields.io/github/stars/YHlorra/lorra-agent.svg?style=social
-[stars-url]: https://github.com/YHlorra/lorra-agent/stargazers
-[issues-badge]: https://img.shields.io/github/issues/YHlorra/lorra-agent.svg
-[issues-url]: https://github.com/YHlorra/lorra-agent/issues

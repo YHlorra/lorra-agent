@@ -9,7 +9,11 @@ A personal deep-work desktop workspace: local file editing and AI agent collabor
 </p>
 
 <p align="center">
-[![License][license-badge]][license-url] [![Version][version-badge]][version-url] [![CI][ci-badge]][ci-url] [![Stars][stars-badge]][stars-url] [![Issues][issues-badge]][issues-url]
+  <a href="https://github.com/YHlorra/lorra-agent/blob/main/LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/License-MIT-yellow.svg"></a>
+  <a href="https://github.com/YHlorra/lorra-agent"><img alt="Version" src="https://img.shields.io/badge/version-2.0.0-6c5ce7.svg"></a>
+  <a href="https://github.com/YHlorra/lorra-agent/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/YHlorra/lorra-agent/actions/workflows/ci.yml/badge.svg"></a>
+  <a href="https://github.com/YHlorra/lorra-agent/stargazers"><img alt="Stars" src="https://img.shields.io/github/stars/YHlorra/lorra-agent.svg?style=social"></a>
+  <a href="https://github.com/YHlorra/lorra-agent/issues"><img alt="Issues" src="https://img.shields.io/github/issues/YHlorra/lorra-agent.svg"></a>
 </p>
 
 ---
@@ -23,10 +27,11 @@ A personal deep-work desktop workspace: local file editing and AI agent collabor
 - [How It Fits Together](#how-it-fits-together)
 - [Development Commands](#development-commands)
 - [Testing](#testing)
-- [AI Coding Agent Setup](#ai-coding-agent-setup)
 - [Security](#security)
 - [License](#license)
 - [Star History](#star-history)
+
+<a id="quick-start"></a>
 
 ## Quick Start
 
@@ -39,6 +44,8 @@ npm start
 ```
 
 **Verification**: the app window opens with the 3-pane workbench (collapsible icon bar / session history + file tree / reader + agent chat). Ask the agent a question in the chat pane; when the agent tries to write a file, the write is suspended until you approve it (allow once / allow always / deny).
+
+<a id="capabilities"></a>
 
 ## Capabilities
 
@@ -55,6 +62,8 @@ npm start
 | Settings & i18n | Unified settings page (appearance, workspace, data sources, tags, about) with instant Chinese/English switching |
 | OFK knowledge layer | Sessions settle as readable Markdown concept docs; daily summaries compile from them; timeline and review read directly from the document layer |
 
+<a id="when-not-to-use"></a>
+
 ## When (Not) to Use
 
 **Use it ✅**
@@ -69,16 +78,22 @@ npm start
 - You want fully automatic writes with no approval gate
 - You're not on Windows (no macOS / Linux builds yet)
 
+<a id="model-configuration"></a>
+
 ## Model Configuration
 
 - Connect model providers in the settings page; credentials are stored via the SDK auth store, never hardcoded or written in plaintext
 - The agent can use web search as a first-class tool
+
+<a id="how-it-fits-together"></a>
 
 ## How It Fits Together
 
 - **Stack**: Electron + React + TypeScript, styled with Tailwind CSS
 - **Agent core**: custom adapter wrapping the [`@earendil-works/pi-ai`](https://www.npmjs.com/package/@earendil-works/pi-ai) / `pi-coding-agent` agent SDK
 - **Build & quality**: Electron Forge + Vite; Biome checks; Vitest + Playwright tests
+
+<a id="development-commands"></a>
 
 ## Development Commands
 
@@ -99,15 +114,13 @@ Prerequisite: Node >= 22.19, npm (`package-lock.json` v3; no other package manag
 | `npx vitest run --config scripts/coverage-<side>.vitest.config.ts --coverage` | Coverage run (per-side config) |
 | `scripts/gauntlet-ofk.cmd` / `scripts/gauntlet-skills.cmd` | Fail-closed evidence gates: typecheck → baseline → biome → mutation → residual scan → e2e |
 
+<a id="testing"></a>
+
 ## Testing
 
 CI runs on every push to `main` (GitHub Actions, `windows-latest`): typecheck → lint → unit/component tests → bundle build → real-Electron e2e (isolated profile) → Squirrel installer.
 
-## AI Coding Agent Setup
-
-> [!NOTE]
-> This repository does not currently ship agent instruction files / MCP config / skills.
-> <!-- TODO: document AI coding agent (Claude Code / Codex, etc.) setup here once provided -->
+<a id="security"></a>
 
 ## Security
 
@@ -118,23 +131,18 @@ CI runs on every push to `main` (GitHub Actions, `windows-latest`): typecheck �
 
 Found a vulnerability? Report it via [GitHub Issues](https://github.com/YHlorra/lorra-agent/issues) without disclosing exploit details publicly.
 
+<a id="license"></a>
+
 ## License
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://github.com/YHlorra/lorra-agent/blob/main/LICENSE)
+<p>
+  <a href="https://github.com/YHlorra/lorra-agent/blob/main/LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/License-MIT-yellow.svg"></a>
+</p>
 
 Released under the [MIT License](https://github.com/YHlorra/lorra-agent/blob/main/LICENSE). Copyright (c) 2026 YHlorra.
+
+<a id="star-history"></a>
 
 ## Star History
 
 [![Star History Chart](https://api.star-history.com/svg?repos=YHlorra/lorra-agent&type=Date)](https://star-history.com/#YHlorra/lorra-agent&Date)
-
-[license-badge]: https://img.shields.io/badge/License-MIT-yellow.svg
-[license-url]: https://github.com/YHlorra/lorra-agent/blob/main/LICENSE
-[version-badge]: https://img.shields.io/badge/version-2.0.0-6c5ce7.svg
-[version-url]: https://github.com/YHlorra/lorra-agent
-[ci-badge]: https://github.com/YHlorra/lorra-agent/actions/workflows/ci.yml/badge.svg
-[ci-url]: https://github.com/YHlorra/lorra-agent/actions/workflows/ci.yml
-[stars-badge]: https://img.shields.io/github/stars/YHlorra/lorra-agent.svg?style=social
-[stars-url]: https://github.com/YHlorra/lorra-agent/stargazers
-[issues-badge]: https://img.shields.io/github/issues/YHlorra/lorra-agent.svg
-[issues-url]: https://github.com/YHlorra/lorra-agent/issues
