@@ -13,6 +13,12 @@ test-results/
 electron-stderr.log
 electron-stdout.log
 
+# Test artifacts
+coverage/
+playwright-report/
+blob-report/
+test-out.txt
+
 # Deepwork state (kept readable via .ignore)
 .slim/
 
@@ -58,3 +64,16 @@ CLAUDE.md
 PRD.md
 # bd worktree
 composer-input/
+
+# Package manager logs
+npm-debug.log*
+yarn-debug.log*
+pnpm-debug.log*
+
+# TypeScript incremental build info
+*.tsbuildinfo
+
+# OS noise
+Thumbs.db
+Desktop.ini
+.DS_Store
