@@ -499,7 +499,10 @@ describe('6.3 自定义供应商表单', () => {
         await waitFor(() => {
           const charsetError = screen.queryByText(/ID 须以小写字母或数字开头/);
           const collisionError = screen.queryByText(/该 ID 与内置供应商冲突/);
-          const expectedError = !idPattern.test(id);
+          // 表单按 trim 后的值校验(空串=未填写、' a'→'a' 合法),
+          // 属性断言须与之一致,否则空白串/首尾空格串会误报。
+          const normalized = id.trim();
+          const expectedError = normalized !== '' && !idPattern.test(normalized);
           expect(!!charsetError).toBe(expectedError);
           expect(collisionError).toBeNull();
         }, { timeout: 2000 });

@@ -36,13 +36,19 @@ export function trustedReadDirs(opts: TrustedPathsOpts = {}): string[] {
 }
 
 /** 前缀匹配(目录边界 + 大小写不敏感,Windows realpath 大小写不定)。
- * 调用方传入的 absPath 应为 realpath 形式;目录侧经 canonicalDir 归一
- * 到同形式,两侧才可一致比较。 */
+ * 调用方传入的 absPath 应为 realpath 形式;目录侧同时比较 native 归一形式
+ * 与词法形式——拦截器的 check.realpath(async realpath → 长名/\\?\ 前缀)
+ * 命中 native 形式;junction 词法用例(短名 RUNNER~1 等)命中词法形式;
+ * junction 逃逸(realpath 落库外)两种形式都不命中 → 保持拒绝。 */
 export function isTrustedReadPath(absPath: string, opts: TrustedPathsOpts = {}): boolean {
   const lower = absPath.toLowerCase();
   return trustedReadDirs(opts).some((dir) => {
-    const d = canonicalDir(dir).toLowerCase();
-    const prefix = d.endsWith(path.sep) ? d : d + path.sep;
-    return lower === d || lower.startsWith(prefix);
+    const dNative = canonicalDir(dir).toLowerCase();
+    const dLexical = dir.toLowerCase();
+    for (const d of dLexical === dNative ? [dNative] : [dNative, dLexical]) {
+      const prefix = d.endsWith(path.sep) ? d : d + path.sep;
+      if (lower === d || lower.startsWith(prefix)) return true;
+    }
+    return false;
   });
 }
