@@ -58,6 +58,26 @@ describe('工作台', () => {
     );
   });
 
+  it('Given 多个最近工作区 When 点击非激活 tab 的「×」 Then 调 lorra.workspace.remove 且该 tab 消失', async () => {
+    const user = userEvent.setup();
+    const removeSpy = vi
+      .spyOn(window.lorra.workspace, 'remove')
+      .mockResolvedValue({ workspaces: ['C:/test/workspace'] });
+    vi.spyOn(window.lorra.workspace, 'list').mockResolvedValue({
+      workspaces: ['C:/test/workspace', 'C:/test/archive'],
+    });
+
+    render(<App />);
+
+    const removeBtn = await screen.findByRole('button', { name: '从列表移除 archive' });
+    await user.click(removeBtn);
+
+    await waitFor(() => expect(removeSpy).toHaveBeenCalledWith('C:/test/archive'));
+    expect(screen.queryByRole('button', { name: '从列表移除 archive' })).not.toBeInTheDocument();
+    // 激活工作区不渲染移除按钮(设置页同规约)。
+    expect(screen.queryByRole('button', { name: '从列表移除 workspace' })).not.toBeInTheDocument();
+  });
+
   it('Given 已选工作区 When 点击「新建工作区」 Then 调用 lorra.workspace.switch 并刷新会话', async () => {
     const user = userEvent.setup();
     const switchSpy = vi
@@ -254,8 +274,8 @@ describe('工作台', () => {
     // CTA 文案与 composer 必须共存 —— 失败路径不能白屏。
     expect(await screen.findByText('暂无可用模型，连接一个供应商开始对话。')).toBeInTheDocument();
     expect(screen.getByRole('textbox', { name: '向 Agent 提问' })).toBeInTheDocument();
-    // 模型不可用 banner 同时渲染。
-    expect(screen.getByText('模型暂不可用')).toBeInTheDocument();
+    // 空会话无模型:CTA 已传达同一信息,底部 banner 不重复渲染(2026-08-18 修复)。
+    expect(screen.queryByText('模型暂不可用')).not.toBeInTheDocument();
   });
 
   it('Given 打开 providers 视图 When 点击「返回工作区」 Then workspace-grid 重新出现', async () => {

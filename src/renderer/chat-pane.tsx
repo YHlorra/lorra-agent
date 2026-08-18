@@ -272,6 +272,8 @@ export function ChatPane(props: ChatPaneProps): JSX.Element {
         onCommand={props.onCommand}
         inlineError={props.inlineError}
         modelAvailable={props.modelAvailable}
+        // 空会话且无模型时 chat-empty-cta 已传达同一信息,不再重复渲染底部 banner。
+        modelUnavailableBanner={!props.modelAvailable && hasEvents}
         defaultModelName={props.defaultModelName}
         emptyStateMessage={hasEvents || !props.modelAvailable ? '' : t('chat.waitingAi')}
         references={props.references}

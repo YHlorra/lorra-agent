@@ -1,4 +1,5 @@
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import type { RenderResult } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AgentEvent, SessionStatus } from '../../src/shared/agent-events';
 import { ChatPane } from '../../src/renderer/chat-pane';
@@ -860,5 +861,41 @@ describe('ChatPane 新建 Agent 对话按钮', () => {
     expect(() =>
       fireEvent.click(screen.getByRole('button', { name: '新建 Agent 对话' })),
     ).not.toThrow();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 模型不可用提示(2026-08-18 修复):空会话无模型时 chat-empty-cta 已传达同一
+// 信息,底部 banner 不重复渲染;会话已有事件后模型失联 → banner 出现。
+// ---------------------------------------------------------------------------
+
+describe('ChatPane 模型不可用提示', () => {
+  function renderModelOff(events: AgentEvent[]): RenderResult {
+    return render(
+      <ChatPane
+        status="idle"
+        events={events}
+        modelAvailable={false}
+        modelLoading={false}
+        defaultModelName={null}
+        inlineError=""
+        onOpenProviders={() => {}}
+        onSend={() => Promise.resolve()}
+        onAbort={() => Promise.resolve()}
+      />,
+    );
+  }
+
+  it('空会话 + 无模型 → 显示空 CTA,不渲染底部 banner(消除重复提示)', () => {
+    renderModelOff([]);
+    expect(screen.getByText('暂无可用模型，连接一个供应商开始对话。')).toBeInTheDocument();
+    expect(screen.queryByText('模型暂不可用')).toBeNull();
+  });
+
+  it('已有会话事件 + 无模型 → 渲染底部 banner(CTA 已消失)', () => {
+    renderModelOff([messageEvent('message.final', 'user', '继续')]);
+    expect(screen.getByText('模型暂不可用')).toBeInTheDocument();
+    expect(screen.getByText('请检查模型连接或账户配置，工作区仍可继续使用。')).toBeInTheDocument();
+    expect(screen.queryByText('暂无可用模型，连接一个供应商开始对话。')).toBeNull();
   });
 });

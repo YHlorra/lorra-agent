@@ -25,6 +25,13 @@ export interface ComposerProps {
   inlineError?: string;
   /** Model availability: false → show "model unavailable" banner above composer. */
   modelAvailable?: boolean;
+  /**
+   * 显式控制「模型不可用」banner 是否渲染(2026-08-18 修复):缺省跟随
+   * `!modelAvailable`;空会话 CTA(chat-empty-cta)已传达同一信息时由
+   * ChatPane 传 false,避免上下重复提示。发送禁用/斜杠命令 gating 仍走
+   * modelAvailable,不受此 flag 影响。
+   */
+  modelUnavailableBanner?: boolean;
   /** Current default model display name; shown in the composer presence row. */
   defaultModelName?: string | null;
   /** Empty state shown when no events yet for the active session. */
@@ -59,6 +66,7 @@ export function Composer({
   onCommand,
   inlineError = '',
   modelAvailable = true,
+  modelUnavailableBanner,
   defaultModelName,
   emptyStateMessage,
   references,
@@ -604,7 +612,7 @@ export function Composer({
         </div>
       )}
 
-      {!modelAvailable ? (
+      {(modelUnavailableBanner ?? !modelAvailable) ? (
         <div className="composer-banner composer-banner-warning" role="status">
           <strong>{t('composer.modelUnavailable')}</strong>
           <span>{t('composer.modelUnavailableDesc')}</span>

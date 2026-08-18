@@ -156,7 +156,9 @@ export function layoutSection(
     const height =
       seg.unfinished && opts.nowTop !== null
         ? Math.max(opts.nowTop - top0, opts.minH)
-        : opts.nowTop !== null && top0 + Math.max(activeH, opts.minH) > opts.nowTop
+        : opts.nowTop !== null &&
+            top0 < opts.nowTop &&
+            top0 + Math.max(activeH, opts.minH) > opts.nowTop
           ? activeH // 完成块最小高度延伸不得越过当前时刻线 → 截断回自然时长高
           : Math.max(activeH, opts.minH);
     placed[idx] = { lane: laneOf.get(seg.sessionRef) ?? 0, top: top0, height };

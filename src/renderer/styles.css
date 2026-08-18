@@ -212,14 +212,14 @@ button:focus-visible, textarea:focus-visible, a:focus-visible {
   max-width: 180px;
   display: inline-flex;
   align-items: center;
-  gap: 7px;
-  padding: 0 12px 0 7px;
+  gap: 2px;
+  padding: 0 6px 0 7px;
   border: 1px solid transparent;
   border-radius: var(--radius-md);
   background: transparent;
   color: rgb(var(--muted));
   font-size: 12px;
-  cursor: pointer;
+  cursor: default;
   transition: background 130ms ease, border-color 130ms ease, color 130ms ease;
 }
 .workspace-tab:hover { background: rgb(var(--ink-warm) / .06); color: rgb(var(--ink-warm)); }
@@ -230,6 +230,36 @@ button:focus-visible, textarea:focus-visible, a:focus-visible {
   font-weight: 600;
   box-shadow: 0 1px 2px rgb(var(--ink-warm) / .06);
 }
+.workspace-tab-main {
+  min-width: 0;
+  flex: 1 1 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+.workspace-tab-remove {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: rgb(var(--faint));
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 130ms ease, background 130ms ease, color 130ms ease;
+}
+.workspace-tab:hover .workspace-tab-remove,
+.workspace-tab-remove:focus-visible { opacity: 1; }
+.workspace-tab-remove:hover { background: rgb(var(--ink-warm) / .1); color: rgb(var(--ink-warm)); }
 .workspace-tab-mark {
   width: 18px;
   height: 18px;
@@ -1474,7 +1504,17 @@ button:focus-visible, textarea:focus-visible, a:focus-visible {
   display: flex; flex-direction: column; gap: 14px; align-items: center;
   animation: reveal 200ms cubic-bezier(.16, 1, .3, 1);
 }
-.chat-empty-cta p { margin: 0; color: rgb(var(--muted)); font-size: 12px; line-height: 1.6; }
+.chat-empty-cta p { margin: 0; color: rgb(var(--ink-warm)); font-size: 12px; line-height: 1.6; }
+
+/* CTA 按钮:chat 区不在 .pc-page 作用域,pc-* 变量未定义(白字透明底 =
+ 字与背景融为一体,2026-08-18 修复)。改用 Kami token:accent-strong 底 + 纸色字。 */
+.chat-empty-cta .pc-btn-primary {
+  background: rgb(var(--accent-strong));
+  border-color: rgb(var(--accent-strong));
+  color: rgb(var(--paper));
+  box-shadow: 0 1px 2px rgb(var(--ink-warm) / .18);
+}
+.chat-empty-cta .pc-btn-primary:hover { background: rgb(var(--accent)); border-color: rgb(var(--accent)); }
 
 /* 空态欢迎页(2026-08-07):问候 + 快捷键提示 + 能力快捷入口。 */
 .chat-welcome {

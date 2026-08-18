@@ -54,6 +54,7 @@
   "sidebar.switchWorkspace": "Switch workspace",
   "workspaceTabs.label": "Workspaces",
   "workspaceTabs.add": "New workspace",
+  "workspaceTabs.remove": "Remove {name} from list",
   "fileTree.label": "File tree",
   "fileTree.hideHidden": "Hide hidden items",
   "fileTree.showHidden": "Show hidden items",

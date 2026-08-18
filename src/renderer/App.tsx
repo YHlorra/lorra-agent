@@ -171,6 +171,20 @@ export function App(): JSX.Element {
     [workspacePath],
   );
 
+  /**
+   * 顶栏 tab「×」:仅从最近工作区列表移除(lorra.workspace.remove 只过滤
+   * settings.recentWorkspaces)。数据留在后台,当前激活工作区不受影响,
+   * 用户可随时通过「+」重新添加 —— 纯界面减负(2026-08-18)。
+   */
+  const removeRecentWorkspace = useCallback(async (path: string) => {
+    try {
+      const result = await window.lorra.workspace.remove(path);
+      setRecentWorkspaces(result.workspaces);
+    } catch {
+      // 移除失败静默:仅影响 tab 条展示,不阻塞工作区功能(设置页有显式错误提示)。
+    }
+  }, []);
+
   // Once a workspace is set, create or continue a session and subscribe to events.
   useEffect(() => {
     if (!workspacePath) return;
@@ -756,6 +770,7 @@ export function App(): JSX.Element {
               activePath={workspacePath}
               onActivate={(path) => void activateWorkspace(path)}
               onAdd={() => void switchWorkspace()}
+              onRemove={(path) => void removeRecentWorkspace(path)}
             />
           )}
         </div>

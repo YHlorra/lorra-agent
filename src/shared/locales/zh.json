@@ -54,6 +54,7 @@
   "sidebar.switchWorkspace": "切换工作区",
   "workspaceTabs.label": "工作区",
   "workspaceTabs.add": "新建工作区",
+  "workspaceTabs.remove": "从列表移除 {name}",
   "fileTree.label": "文件树",
   "fileTree.hideHidden": "隐藏隐藏项",
   "fileTree.showHidden": "显示隐藏项",
