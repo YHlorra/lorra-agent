@@ -27,10 +27,10 @@ export interface SessionState {
   /** 会话内记忆只读通知(1.6):memory.recorded 事件去重追加,自动消退时移除。 */
   recordedNotices?: RecordedNotice[];
   /**
- * thinking 流时间锚点:messageId → 该流首个 thinking.partial 的 ts。
- * events 数组对同 messageId 只保留 final(流式折叠),首个 partial 的 ts 在折叠中
- * 丢失——组时间聚合与思考耗时依赖它,故在折叠点抢救保留。
- */
+   * thinking 流时间锚点:messageId → 该流首个 thinking.partial 的 ts。
+   * events 数组对同 messageId 只保留 final(流式折叠),首个 partial 的 ts 在折叠中
+   * 丢失——组时间聚合与思考耗时依赖它,故在折叠点抢救保留。
+   */
   thinkingFirstTs?: Record<string, number>;
 }
 

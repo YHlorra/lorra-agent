@@ -303,10 +303,10 @@ export function Composer({
   }
 
   /**
- * 粘贴图片(2026-08-14):剪贴板含图片项时走主进程保存 + 图片胶囊;纯文本粘贴
- * 走默认行为(不 preventDefault)。判定基于 paste 事件 clipboardData(同步),
- * 字节读取交给主进程 clipboard.readImage(单一事实源)。
- */
+   * 粘贴图片(2026-08-14):剪贴板含图片项时走主进程保存 + 图片胶囊;纯文本粘贴
+   * 走默认行为(不 preventDefault)。判定基于 paste 事件 clipboardData(同步),
+   * 字节读取交给主进程 clipboard.readImage(单一事实源)。
+   */
   function handlePaste(event: ClipboardEvent<HTMLTextAreaElement>): void {
     const hasImage = Array.from(event.clipboardData?.items ?? []).some(
       (item) => item.kind === 'file' && item.type.startsWith('image/'),

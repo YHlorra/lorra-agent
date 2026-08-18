@@ -55,9 +55,9 @@ export type AgentEvent =
       /** Correlates the thinking stream to the assistant message it precedes. */
       messageId: string;
       /**
- * 该思考段在消息内容块数组中的序号(0-based)。一次回复可能有多个
- * thinking 块(与工具调用交替);缺省 = 单段(历史回放/旧事件兼容)。
- */
+       * 该思考段在消息内容块数组中的序号(0-based)。一次回复可能有多个
+       * thinking 块(与工具调用交替);缺省 = 单段(历史回放/旧事件兼容)。
+       */
       segmentIndex?: number;
       /** 该消息的 thinking 段总数;缺省 = 1。 */
       segmentCount?: number;

@@ -512,9 +512,9 @@ export function App(): JSX.Element {
   }, []);
 
   /**
- * 保存整篇 Markdown(阅读编辑合一)。mtime 守卫失败(文件被其他来源修改)
- * → 重载磁盘版本并提示;普通失败 → 提示原因,编辑块保留内容可重试。
- */
+   * 保存整篇 Markdown(阅读编辑合一)。mtime 守卫失败(文件被其他来源修改)
+   * → 重载磁盘版本并提示;普通失败 → 提示原因,编辑块保留内容可重试。
+   */
   const handleSaveContent = useCallback(
     async (content: string): Promise<'saved' | 'conflict' | 'error'> => {
       if (!activeFileId || file.status !== 'ready') return 'error';

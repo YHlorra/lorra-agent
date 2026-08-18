@@ -43,9 +43,9 @@ export class ReviewStore {
   }
 
   /**
- * 存档:<id>.md = 元数据 JSON 首行 + '\n' + Markdown 正文。
- * markdown 可省略(仅登记元数据的场景,如列表排序测试)。
- */
+   * 存档:<id>.md = 元数据 JSON 首行 + '\n' + Markdown 正文。
+   * markdown 可省略(仅登记元数据的场景,如列表排序测试)。
+   */
   save(meta: ReviewMeta, markdown?: string): Result<ReviewMeta> {
     if (!meta || typeof meta.id !== 'string' || !SAFE_ID.test(meta.id)) {
       return err({ code: 'review-invalid-id', message: 'invalid review id' });

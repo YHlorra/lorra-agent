@@ -512,9 +512,9 @@ export function TodayPage({ onBack, onOpenSession }: TodayPageProps): JSX.Elemen
   }, []);
 
   /**
- * 单条 24h 轨道(2026-08-14 标签分类改造):不再按类别分区;所有段合成
- * 一条时间线,块颜色 = tag(tagColor),tag 过滤 chip 行 + 图例做筛选。
- */
+   * 单条 24h 轨道(2026-08-14 标签分类改造):不再按类别分区;所有段合成
+   * 一条时间线,块颜色 = tag(tagColor),tag 过滤 chip 行 + 图例做筛选。
+   */
   const allSegments = useMemo(
     () => [...(data?.segments ?? [])].sort((a, b) => a.start - b.start || a.end - b.end),
     [data],

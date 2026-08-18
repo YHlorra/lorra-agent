@@ -73,15 +73,15 @@ interface SafeMarkdownProps {
   /** 额外 className;默认 `markdown-body`,与 document-viewer 一致。 */
   className?: string;
   /**
- * 'chat' = 右栏 AI 回答(GFM, );
- * 'document' = 中栏 Obsidian 式阅读(GFM + 数学 + callout/tag/高亮/wiki + mermaid)。
- */
+   * 'chat' = 右栏 AI 回答(GFM, );
+   * 'document' = 中栏 Obsidian 式阅读(GFM + 数学 + callout/tag/高亮/wiki + mermaid)。
+   */
   variant?: 'chat' | 'document';
   /**
- * wikilink 断链标注(仅 document 变体生效,6.12):target → 断链原因。
- * 命中项渲染为 span.wikilink.knowledge-link-broken(data-broken/data-hint),
- * 供页面级事件委托做断链提示与点击导航;缺省 = 原行为(span.wikilink 只渲染)。
- */
+   * wikilink 断链标注(仅 document 变体生效,6.12):target → 断链原因。
+   * 命中项渲染为 span.wikilink.knowledge-link-broken(data-broken/data-hint),
+   * 供页面级事件委托做断链提示与点击导航;缺省 = 原行为(span.wikilink 只渲染)。
+   */
   wikilinkBroken?: ReadonlyMap<string, 'missing' | 'archived'>;
 }
 

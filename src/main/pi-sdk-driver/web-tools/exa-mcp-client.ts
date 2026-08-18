@@ -48,9 +48,9 @@ export class ExaMcpClient {
   }
 
   /**
- * Call an MCP tool and return the first text block of its result.
- * Re-initializes once when the cached session is stale (401/404).
- */
+   * Call an MCP tool and return the first text block of its result.
+   * Re-initializes once when the cached session is stale (401/404).
+   */
   async callTool(
     name: string,
     args: Record<string, unknown>,

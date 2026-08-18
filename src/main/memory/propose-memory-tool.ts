@@ -94,15 +94,15 @@ export interface MemoryRecordedPayload {
 
 export interface MemoryToolDeps {
   /**
- * 共享 MemoryStore 单例（调用时惰性解析）。
- * 允许返回 Promise: 注册处经动态 import 装载共享单例（node:sqlite 不进
- * vitest client 测试图, 与 shared-facts-store 同款纪律）。
- */
+   * 共享 MemoryStore 单例（调用时惰性解析）。
+   * 允许返回 Promise: 注册处经动态 import 装载共享单例（node:sqlite 不进
+   * vitest client 测试图, 与 shared-facts-store 同款纪律）。
+   */
   getStore: () => MemoryToolStore | Promise<MemoryToolStore>;
   /**
- * 成功写入（propose/update）后的事件回调。entryId/title/kind/evidence 由本
- * 工具从落盘条目填写; sessionId 由注册处闭包注入（工具执行时会话已创建）。
- */
+   * 成功写入（propose/update）后的事件回调。entryId/title/kind/evidence 由本
+   * 工具从落盘条目填写; sessionId 由注册处闭包注入（工具执行时会话已创建）。
+   */
   emitRecorded?: (payload: MemoryRecordedPayload) => void;
   /** 当前 agent 标识（MemoryEntry.producer）。缺省 'pi-sdk'。 */
   getProducer?: () => string;

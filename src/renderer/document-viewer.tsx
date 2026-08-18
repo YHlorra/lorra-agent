@@ -200,7 +200,7 @@ export const DocumentViewer = memo(function DocumentViewer({
   }, []);
 
   /** Ctrl+点击导航(2026-08-17):双链 [[target]] → 工作区文件;外链 → 系统浏览器;相对路径 → 中栏。
- * capture 阶段拦截,避免事件落到正文 BlockWrap 的就地编辑(Ctrl+点击链接不进编辑态)。 */
+   * capture 阶段拦截,避免事件落到正文 BlockWrap 的就地编辑(Ctrl+点击链接不进编辑态)。 */
   const handleNavClick = useCallback(
     (e: ReactMouseEvent<HTMLElement>) => {
       if (!(e.ctrlKey || e.metaKey)) return;

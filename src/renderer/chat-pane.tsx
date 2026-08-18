@@ -82,9 +82,9 @@ interface ChatPaneProps {
   /** 当前工作区绝对路径（拖拽文件填充相对路径用）。 */
   workspacePath?: string | null;
   /**
- * thinking 流时间锚点(messageId → 首个 partial ts)。reducer 折叠后 events
- * 里无 partial,组时间/思考耗时依赖此锚点;缺省 = 直传事件流路径,内部自记。
- */
+   * thinking 流时间锚点(messageId → 首个 partial ts)。reducer 折叠后 events
+   * 里无 partial,组时间/思考耗时依赖此锚点;缺省 = 直传事件流路径,内部自记。
+   */
   thinkingFirstTs?: Readonly<Record<string, number>>;
 }
 

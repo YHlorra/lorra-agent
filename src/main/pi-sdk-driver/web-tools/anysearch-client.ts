@@ -42,9 +42,9 @@ export class AnySearchClient {
   }
 
   /**
- * 调用 AnySearch 工具并返回全部 text 块拼接(单块时即该块全文)。
- * 超时用 Promise.race(同 ExaMcpClient 纪律);外部 AbortSignal 优先。
- */
+   * 调用 AnySearch 工具并返回全部 text 块拼接(单块时即该块全文)。
+   * 超时用 Promise.race(同 ExaMcpClient 纪律);外部 AbortSignal 优先。
+   */
   async callTool(
     name: string,
     args: Record<string, unknown>,

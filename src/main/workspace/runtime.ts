@@ -45,10 +45,10 @@ export interface WorkspaceRuntime {
   /** Drop the active workspace; used by the titlebar switch button. */
   deactivate(): Promise<void>;
   /**
- * Register a window so its webContents receives agent events from the
- * current driver (and re-binds when the driver is rebuilt on workspace
- * switch). Idempotent per wc; returns a detach function for symmetry.
- */
+   * Register a window so its webContents receives agent events from the
+   * current driver (and re-binds when the driver is rebuilt on workspace
+   * switch). Idempotent per wc; returns a detach function for symmetry.
+   */
   attachWindow(wc: WebContents): () => void;
 }
 

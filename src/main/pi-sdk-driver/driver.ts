@@ -82,10 +82,10 @@ export interface DriverOptions {
   workspacePath: string;
   persistence: SessionPersistence;
   /**
- * 热会话增量(事实管道):任一 SDK 会话活动事件触发时以该会话的 jsonl
- * 路径回调,由应用层防抖后重清洗写入事实库。fire-and-forget,
- * 失败不进入事件热路径。
- */
+   * 热会话增量(事实管道):任一 SDK 会话活动事件触发时以该会话的 jsonl
+   * 路径回调,由应用层防抖后重清洗写入事实库。fire-and-forget,
+   * 失败不进入事件热路径。
+   */
   onSessionActivity?: (sessionFile: string) => void;
 }
 
@@ -133,10 +133,10 @@ export class LorraDriver {
   }
 
   /**
- * 拦截器调用:write/edit 需审批 → 生成 approvalId、发事件、挂起等待用户裁决。
- * 返回的 Promise 由 respondApproval 按 approvalId resolve(三态裁决);
- * 无活跃会话时无处审批,直接 resolve deny(拦截器兜底 block + terminate)。
- */
+   * 拦截器调用:write/edit 需审批 → 生成 approvalId、发事件、挂起等待用户裁决。
+   * 返回的 Promise 由 respondApproval 按 approvalId resolve(三态裁决);
+   * 无活跃会话时无处审批,直接 resolve deny(拦截器兜底 block + terminate)。
+   */
   requestApproval(payload: {
     toolName: string;
     target: string;
@@ -178,9 +178,9 @@ export class LorraDriver {
   }
 
   /**
- * 用户裁决:resolve 拦截器挂起的等待(allow → 放行工具执行;deny → 拦截器
- * 返回 block + terminate,agent 停止当前轮)。裁决经事件同步渲染端清审批模态。
- */
+   * 用户裁决:resolve 拦截器挂起的等待(allow → 放行工具执行;deny → 拦截器
+   * 返回 block + terminate,agent 停止当前轮)。裁决经事件同步渲染端清审批模态。
+   */
   async respondApproval(
     _sessionId: string,
     approvalId: string,
@@ -278,12 +278,12 @@ export class LorraDriver {
   }
 
   /**
- * 记忆写入成功事件(/D6):memory 工具 propose/update 成功后经
- * router 发 'memory.recorded'(形状 = agent-events.ts MemoryRecordedEvent,
- * 渲染端 reducer 据此追加只读通知条)。会话未注册时静默跳过。
- * 注:MemoryRecordedEvent 由 RendererAutonomy 在 agent-events.ts 定稿,
- * 未落地前以字面量 + cast 桥接;落地后移除 cast 并改用导出类型。
- */
+   * 记忆写入成功事件(/D6):memory 工具 propose/update 成功后经
+   * router 发 'memory.recorded'(形状 = agent-events.ts MemoryRecordedEvent,
+   * 渲染端 reducer 据此追加只读通知条)。会话未注册时静默跳过。
+   * 注:MemoryRecordedEvent 由 RendererAutonomy 在 agent-events.ts 定稿,
+   * 未落地前以字面量 + cast 桥接;落地后移除 cast 并改用导出类型。
+   */
   emitMemoryRecorded(payload: MemoryRecordedPayload): void {
     try {
       const seq = this.registry.nextSeq(payload.sessionId);
@@ -343,13 +343,13 @@ export class LorraDriver {
   }
 
   /**
- * Wire the AgentSession's internal event stream through EventMapper and
- * into the EventRouter for the given handle. Idempotent: replaces any
- * prior subscription on the same handle. Called at registration time
- * (continueRecent/newSession/openSession), NOT inside send — that way
- * historical sessions opened without an immediate send still receive
- * any event the SDK flushes on subscribe.
- */
+   * Wire the AgentSession's internal event stream through EventMapper and
+   * into the EventRouter for the given handle. Idempotent: replaces any
+   * prior subscription on the same handle. Called at registration time
+   * (continueRecent/newSession/openSession), NOT inside send — that way
+   * historical sessions opened without an immediate send still receive
+   * any event the SDK flushes on subscribe.
+   */
   private attachSessionSubscription(handle: AgentSession): void {
     const sessionId = handle.sessionId;
     const record = this.registry.get(sessionId);
@@ -522,10 +522,10 @@ export class LorraDriver {
   }
 
   /**
- * 当前会话模型是否具备图像输入能力。SDK 的 read 工具按
- * `model.input.includes('image')` 判定(getNonVisionImageNote);此处对齐。
- * 模型信息缺失(测试桩/未知)一律视为不支持 → 不传图,行为与旧版一致。
- */
+   * 当前会话模型是否具备图像输入能力。SDK 的 read 工具按
+   * `model.input.includes('image')` 判定(getNonVisionImageNote);此处对齐。
+   * 模型信息缺失(测试桩/未知)一律视为不支持 → 不传图,行为与旧版一致。
+   */
   private modelSupportsImages(record: SessionRecord): boolean {
     const model = (record.piSessionHandle as unknown as { model?: { input?: string[] | string } })
       ?.model;
@@ -535,9 +535,9 @@ export class LorraDriver {
   }
 
   /**
- * P1 分层记忆注入:每轮都附 core block;仅在会话尚无任何用户消息时附加首轮
- * recall 参考块。任一块构建失败都 fail-open, 绝不阻断发送。
- */
+   * P1 分层记忆注入:每轮都附 core block;仅在会话尚无任何用户消息时附加首轮
+   * recall 参考块。任一块构建失败都 fail-open, 绝不阻断发送。
+   */
   private async maybeInjectMemoryContext(record: SessionRecord, text: string): Promise<string> {
     const sections: string[] = [];
     const hasUserMessages = this.hasUserMessages(record);
@@ -587,10 +587,10 @@ export class LorraDriver {
   }
 
   /**
- * 会话是否已含用户消息:新会话/首条消息前为 false(注入窗口)。
- * 判定依据:handle.messages(会话运行后 SDK 已装载的 agent state)与
- * sessionManager.fileEntries(attach 时已 replay 的历史 jsonl)。
- */
+   * 会话是否已含用户消息:新会话/首条消息前为 false(注入窗口)。
+   * 判定依据:handle.messages(会话运行后 SDK 已装载的 agent state)与
+   * sessionManager.fileEntries(attach 时已 replay 的历史 jsonl)。
+   */
   private hasUserMessages(record: SessionRecord): boolean {
     const handle = record.piSessionHandle;
     if ((handle.messages ?? []).some(isUserMessage)) return true;
@@ -618,10 +618,10 @@ export class LorraDriver {
   }
 
   /**
- * 手动压缩会话上下文(pi TUI `/compact`):委托 AgentSession.compact 汇总旧
- * 消息并截断。仅空闲会话允许;busy 时返回 { accepted: false }(与 send 同款
- * 拒绝形状),其余异常上抛由 IPC 层包装为错误。
- */
+   * 手动压缩会话上下文(pi TUI `/compact`):委托 AgentSession.compact 汇总旧
+   * 消息并截断。仅空闲会话允许;busy 时返回 { accepted: false }(与 send 同款
+   * 拒绝形状),其余异常上抛由 IPC 层包装为错误。
+   */
   async compact(sessionId: string): Promise<{ accepted: boolean }> {
     const record = this.registry.get(sessionId);
     if (!record) throw new Error(`session not found: ${sessionId}`);

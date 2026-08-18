@@ -153,10 +153,10 @@ export async function createSessionPersistence(opts: {
   /** 分级审批:会话内已批准 (toolName, target) 直放。 */
   checkApproved?: (toolName: string, target: string) => boolean;
   /**
- * 记忆写入成功事件(/D6):memory 工具 propose/update 成功后回调,
- * payload 形状 = agent-events.ts MemoryRecordedEvent(RendererAutonomy 定稿,
- * 未落地前经此回调以字面量对象转发)。sessionId 在会话创建后注入。
- */
+   * 记忆写入成功事件(/D6):memory 工具 propose/update 成功后回调,
+   * payload 形状 = agent-events.ts MemoryRecordedEvent(RendererAutonomy 定稿,
+   * 未落地前经此回调以字面量对象转发)。sessionId 在会话创建后注入。
+   */
   emitMemoryRecorded?: (payload: MemoryRecordedPayload) => void;
 }): Promise<SessionPersistence> {
   const wsRealpath = await realpath(opts.workspacePath);

@@ -282,9 +282,9 @@ function paragraphSummary(content: string): string {
 
 export class MemoryStore {
   /**
- * 句柄以非枚举属性存储(facts-store 同款):不暴露内部实现细节,
- * 也避免 vitest 深比较触达 node:sqlite 句柄。
- */
+   * 句柄以非枚举属性存储(facts-store 同款):不暴露内部实现细节,
+   * 也避免 vitest 深比较触达 node:sqlite 句柄。
+   */
   private readonly db!: DatabaseSync;
   private closed = false;
 
@@ -366,10 +366,10 @@ export class MemoryStore {
   }
 
   /**
- * 内容规范化哈希(幂等去重与 supersedes 链的依据):
- * 只哈希内容字段 + 固定占位(active/null/0),时间戳与 lifecycle 不入哈希——
- * 保证同内容任意时刻 propose 得到同一 entry_id(契约:同内容必然同 id)。
- */
+   * 内容规范化哈希(幂等去重与 supersedes 链的依据):
+   * 只哈希内容字段 + 固定占位(active/null/0),时间戳与 lifecycle 不入哈希——
+   * 保证同内容任意时刻 propose 得到同一 entry_id(契约:同内容必然同 id)。
+   */
   private static contentId(input: ProposeInput): string {
     return entryIdOf({
       schemaVersion: MEMORY_SCHEMA_VERSION,
@@ -402,7 +402,7 @@ export class MemoryStore {
   }
 
   /** v1 哈希域(MEMORY_SCHEMA_VERSION=1 时代):无 ofkRef 键 + schemaVersion 1。
- * 以 null 传 ofkRef 后从对象中删除该键(sortKeys 前剥离),复现 v1 规范形。 */
+   * 以 null 传 ofkRef 后从对象中删除该键(sortKeys 前剥离),复现 v1 规范形。 */
   private static contentIdV1(input: ProposeInput): string {
     const { ofkRef: _ofkRef, ...rest } = {
       schemaVersion: 1,
@@ -481,12 +481,12 @@ export class MemoryStore {
   }
 
   /**
- * 存量长内容迁移(open 末尾执行):active 且 ofk_ref IS NULL 且
- * utf8 字节 > MEMORY_SPLIT_THRESHOLD_BYTES 的条目 → 写 OFK
- * memory/<entryId>.md(完整内容)→ 条目 content 变摘要 + 指针、ofk_ref 置位。
- * 逐条目 fail-open:写失败 → console.error 跳过,下次 open 重试;memory.db
- * 原内容不动(数据不丢)。写入经 ofk-bundle writeConcept(原子写 + 路径校验)。
- */
+   * 存量长内容迁移(open 末尾执行):active 且 ofk_ref IS NULL 且
+   * utf8 字节 > MEMORY_SPLIT_THRESHOLD_BYTES 的条目 → 写 OFK
+   * memory/<entryId>.md(完整内容)→ 条目 content 变摘要 + 指针、ofk_ref 置位。
+   * 逐条目 fail-open:写失败 → console.error 跳过,下次 open 重试;memory.db
+   * 原内容不动(数据不丢)。写入经 ofk-bundle writeConcept(原子写 + 路径校验)。
+   */
   private migrateLongContentToOfk(dbPath: string): void {
     const rows = this.db
       .prepare(
@@ -531,10 +531,10 @@ export class MemoryStore {
   }
 
   /**
- * 自主写入入口:任何来源写入直落 active + confirmedAt=now,
- * 无确认闸门。哈希幂等:同 entry_id 已存在 → no-op 返回既有条目
- * (任何 lifecycle 均如此,不再有 already-rejected);不存在 → 插入 active。
- */
+   * 自主写入入口:任何来源写入直落 active + confirmedAt=now,
+   * 无确认闸门。哈希幂等:同 entry_id 已存在 → no-op 返回既有条目
+   * (任何 lifecycle 均如此,不再有 already-rejected);不存在 → 插入 active。
+   */
   propose(input: ProposeInput): Result<MemoryEntry> {
     try {
       if (MemoryStore.isContentTooLong(input.content)) {
@@ -621,12 +621,12 @@ export class MemoryStore {
   }
 
   /**
- * 就地更新(agent 自维护 + 记忆页触点③纠正入口):
- * 以补丁字段新建 entry(supersedes=原 entryId、lifecycle=active、
- * confirmedAt=now,kind/producer/source/scope/workspace/evidence/basis
- * 继承原值,补丁提供的字段覆盖),原 entry → superseded。
- * 补丁为空或与原文一致 → no-change;content 超限 → content-too-long。
- */
+   * 就地更新(agent 自维护 + 记忆页触点③纠正入口):
+   * 以补丁字段新建 entry(supersedes=原 entryId、lifecycle=active、
+   * confirmedAt=now,kind/producer/source/scope/workspace/evidence/basis
+   * 继承原值,补丁提供的字段覆盖),原 entry → superseded。
+   * 补丁为空或与原文一致 → no-change;content 超限 → content-too-long。
+   */
   update(entryId: string, patch: UpdatePatch): Result<MemoryEntry> {
     try {
       const original = this.findEntry(entryId);
@@ -710,7 +710,7 @@ export class MemoryStore {
   }
 
   /** 编辑(IPC edit 通道):= update 语义,title/content 必填(用户侧编辑入口)。
- * 2026-08-10:kind 可改(类别编辑),scope/evidence 继承不变。 */
+   * 2026-08-10:kind 可改(类别编辑),scope/evidence 继承不变。 */
   edit(
     entryId: string,
     title: string,
@@ -755,14 +755,14 @@ export class MemoryStore {
   }
 
   /**
- * ingest 编译匹配(方向 B 编译循环):给定提取产物的标题与内容,
- * 在生效 knowledge 页里找「标题命中 / 首段命中」的既有页,供编译层就地
- * update(supersedes 链)而非盲目新增。匹配规则确定性、无 LLM:
- * - 标题命中:规范化(trim + 折叠空白)后相等,或一方包含另一方(长度≥2);
- * - 首段命中:双方首段(首个 \n\n 块,无则首行)较短者被较长者包含(≥6 字符);
- * - 优先级:标题命中 > 首段命中;同级取 updatedAt 最新;无命中 → null。
- * 检索永不授权同源:匹配只作编译路由,不改变任何条目。
- */
+   * ingest 编译匹配(方向 B 编译循环):给定提取产物的标题与内容,
+   * 在生效 knowledge 页里找「标题命中 / 首段命中」的既有页,供编译层就地
+   * update(supersedes 链)而非盲目新增。匹配规则确定性、无 LLM:
+   * - 标题命中:规范化(trim + 折叠空白)后相等,或一方包含另一方(长度≥2);
+   * - 首段命中:双方首段(首个 \n\n 块,无则首行)较短者被较长者包含(≥6 字符);
+   * - 优先级:标题命中 > 首段命中;同级取 updatedAt 最新;无命中 → null。
+   * 检索永不授权同源:匹配只作编译路由,不改变任何条目。
+   */
   compileMatch(input: { title: string; content: string }): Result<MemoryEntry | null> {
     try {
       const active = this.listActive('knowledge');
@@ -803,14 +803,14 @@ export class MemoryStore {
   }
 
   /**
- * 自动关联回链(方向 C / 跨 kind):给定来源条目 id 与
- * 主题短语集合,在全部生效条目里做确定性标题匹配(与 compileMatch 同
- * norm/contains 先例),命中即建链 from→to(INSERT OR IGNORE,幂等)。
- * 返回实际新建的 to_id 列表。
- * 规则:短语与标题都做 norm(trim+折叠空白) 后互相包含(长度≥2)判定;
- * 排除来源自身;全部生效条目参与(跨 kind 图谱连接——偏好/经验/知识页
- * 彼此连边,不限于 knowledge 类);上限 MEMORY_LINK_MAX 条。
- */
+   * 自动关联回链(方向 C / 跨 kind):给定来源条目 id 与
+   * 主题短语集合,在全部生效条目里做确定性标题匹配(与 compileMatch 同
+   * norm/contains 先例),命中即建链 from→to(INSERT OR IGNORE,幂等)。
+   * 返回实际新建的 to_id 列表。
+   * 规则:短语与标题都做 norm(trim+折叠空白) 后互相包含(长度≥2)判定;
+   * 排除来源自身;全部生效条目参与(跨 kind 图谱连接——偏好/经验/知识页
+   * 彼此连边,不限于 knowledge 类);上限 MEMORY_LINK_MAX 条。
+   */
   linkRelated(fromId: string, topicPhrases: string[]): Result<string[]> {
     const active = this.listActive();
     if (active.isErr()) return err(active.error);
@@ -853,10 +853,10 @@ export class MemoryStore {
   }
 
   /**
- * 子串检索(trigram LIKE):仅 active;scope 过滤(user/agent 级全局命中,
- * workspace/project 级需 workspace 匹配入参);排序 = 首个 token 命中位置
- * 靠前 > 命中次数多者优先 > 内容短者优先(替代 BM25 的启发式,JS 侧计算)。
- */
+   * 子串检索(trigram LIKE):仅 active;scope 过滤(user/agent 级全局命中,
+   * workspace/project 级需 workspace 匹配入参);排序 = 首个 token 命中位置
+   * 靠前 > 命中次数多者优先 > 内容短者优先(替代 BM25 的启发式,JS 侧计算)。
+   */
   search(input: SearchInput): Result<MemoryEntry[]> {
     try {
       const tokens = input.query
@@ -914,9 +914,9 @@ export class MemoryStore {
   }
 
   /**
- * 召回(会话启动注入/检索注入):仅 active + scope 过滤;
- * 排序键 = evidence 权重 > updatedAt 新鲜度 > 可选 query 命中位置;截断 k。
- */
+   * 召回(会话启动注入/检索注入):仅 active + scope 过滤;
+   * 排序键 = evidence 权重 > updatedAt 新鲜度 > 可选 query 命中位置;截断 k。
+   */
   recall(input: RecallInput): Result<MemoryEntry[]> {
     try {
       const k = input.k ?? MEMORY_RECALL_TOP_K;
@@ -1020,9 +1020,9 @@ export class MemoryStore {
   }
 
   /**
- * 会话提取水位:某会话 jsonl 已提取到的行号。
- * 无记录(首次提取) → 0。增量提取器据此只处理新行。
- */
+   * 会话提取水位:某会话 jsonl 已提取到的行号。
+   * 无记录(首次提取) → 0。增量提取器据此只处理新行。
+   */
   getExtractionWatermark(sessionFile: string): Result<number> {
     try {
       const row = this.db
@@ -1035,10 +1035,10 @@ export class MemoryStore {
   }
 
   /**
- * 会话提取水位写入。默认 MAX 语义:低水位不覆盖高水位(并发完成乱序
- * 时水位单调不后退);force: true 无条件覆盖——只给重置路径(水位 > 行数
- * 的 compaction 全量重提)使用,否则 MAX 会挡住重置 0 造成死循环。
- */
+   * 会话提取水位写入。默认 MAX 语义:低水位不覆盖高水位(并发完成乱序
+   * 时水位单调不后退);force: true 无条件覆盖——只给重置路径(水位 > 行数
+   * 的 compaction 全量重提)使用,否则 MAX 会挡住重置 0 造成死循环。
+   */
   setExtractionWatermark(
     sessionFile: string,
     lastLine: number,
@@ -1063,9 +1063,9 @@ export class MemoryStore {
   }
 
   /**
- * 图谱数据出口:entry_links 全量边列表(展示阶段消费——
- * 网络图/关系面板)。返回形状 [{ fromId, toId }],无排序保证。
- */
+   * 图谱数据出口:entry_links 全量边列表(展示阶段消费——
+   * 网络图/关系面板)。返回形状 [{ fromId, toId }],无排序保证。
+   */
   listLinks(): Result<Array<{ fromId: string; toId: string }>> {
     try {
       const rows = this.db

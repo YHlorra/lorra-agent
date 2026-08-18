@@ -1,7 +1,7 @@
 /**
  * IPC contract — credential zero-transit (static / compile-time assertion).
  *
- * Spec: 
+ * Spec:
  * → Requirement "凭证零穿越" → Scenario "IPC 签名中无凭证字段名"
  * ADR: adr/.md D2/D3
  *
@@ -17,7 +17,7 @@
  * TDD state (red): src/preload.ts does not yet expose the `providers` or
  * `models` namespaces. The expected compile error is
  * "Property 'providers' does not exist on type 'LorraApi'"
- * pointing at the `LorraApi['providers']` access below. Once 
+ * pointing at the `LorraApi['providers']` access below. Once
  * adds the namespaces correctly, the contract assertions below become
  * the live guard.
  *

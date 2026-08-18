@@ -185,12 +185,12 @@ export interface MemoryEntry {
   createdAt: number;
   updatedAt: number;
   /** 激活时间戳：写入直落 active 即记录（无确认环节）；
- * 开库迁移的旧 candidate 行无此值（null），其后 update 的新条目必非空。 */
+   * 开库迁移的旧 candidate 行无此值（null），其后 update 的新条目必非空。 */
   confirmedAt: number | null;
   /**
- * OFK 文档指针：bundle 相对路径（/memory/<entryId>.md 形态）。
- * 长内容（> MEMORY_SPLIT_THRESHOLD_BYTES）拆分子段 + 指针；仅改指针走就地
- * UPDATE 不产 supersedes。不入内容哈希（contentId 白名单不含此字段）。
- */
+   * OFK 文档指针：bundle 相对路径（/memory/<entryId>.md 形态）。
+   * 长内容（> MEMORY_SPLIT_THRESHOLD_BYTES）拆分子段 + 指针；仅改指针走就地
+   * UPDATE 不产 supersedes。不入内容哈希（contentId 白名单不含此字段）。
+   */
   ofkRef: string | null;
 }

@@ -46,9 +46,9 @@ export class EditRecordStore {
   }
 
   /**
- * 幂等加载:目录不存在或文件缺失 → 空存储;解析失败 → 空存储(下次 save 全量重建)。
- * load 时丢弃超 7 天的已裁决(accepted/reverted)记录;applied 记录不清理。
- */
+   * 幂等加载:目录不存在或文件缺失 → 空存储;解析失败 → 空存储(下次 save 全量重建)。
+   * load 时丢弃超 7 天的已裁决(accepted/reverted)记录;applied 记录不清理。
+   */
   async load(): Promise<void> {
     let raw: string;
     try {

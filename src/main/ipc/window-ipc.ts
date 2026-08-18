@@ -42,7 +42,7 @@ export function registerWindowHandlers(): void {
   });
 
   /** 外链跳转(2026-08-17):document-viewer Ctrl+点击调用,经 shell 交给系统浏览器。
- * 协议白名单走 src/main/lib/external-url.ts 单源;此处只负责 shell 转发。 */
+   * 协议白名单走 src/main/lib/external-url.ts 单源;此处只负责 shell 转发。 */
   ipcMain.handle('lorra.app.openExternal', (_e, url: string): boolean => {
     if (isExternalUrl(url)) void shell.openExternal(url);
     return true;

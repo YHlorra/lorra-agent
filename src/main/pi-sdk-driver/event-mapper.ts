@@ -13,11 +13,11 @@ export interface MapperDeps {
     content: { text: string };
   };
   /**
- * Extract the SDK thinking blocks (`{ type: 'thinking', thinking }`) from a
- * message as an ordered segment list — block boundaries are preserved so the
- * renderer can render each thinking segment inline in the message stream.
- * Empty array = no thinking content.
- */
+   * Extract the SDK thinking blocks (`{ type: 'thinking', thinking }`) from a
+   * message as an ordered segment list — block boundaries are preserved so the
+   * renderer can render each thinking segment inline in the message stream.
+   * Empty array = no thinking content.
+   */
   toMessageThinkingSegments(
     message: unknown,
   ): Array<{ thinking: string; redacted?: boolean }> | null;
@@ -45,10 +45,10 @@ export class EventMapper {
   /** tool_execution_start 的原始参数:end 事件不带 args,target 需从调用参数提取。 */
   private toolArgsByCall = new Map<string, unknown>();
   /**
- * Last thinking text emitted per segment for the in-flight assistant message,
- * so duplicate thinking.partial events (text-only updates carry the
- * accumulated thinking too) are suppressed per segment. Reset at message_end.
- */
+   * Last thinking text emitted per segment for the in-flight assistant message,
+   * so duplicate thinking.partial events (text-only updates carry the
+   * accumulated thinking too) are suppressed per segment. Reset at message_end.
+   */
   private lastSegmentTexts = new Map<number, string>();
 
   constructor(private readonly deps: MapperDeps) {}
@@ -241,18 +241,18 @@ export class EventMapper {
   }
 
   /**
- * Project an in-memory AgentMessage[] (already deserialized from the JSONL
- * by SessionManager.open) into the same AgentEvent envelope the live event
- * stream emits. Used at session registration time to give the renderer
- * the historical conversation without re-parsing the JSONL ourselves.
- *
- * The discriminator is `msg.role`:
- * - 'user' / 'assistant' → message.final
- * - tool calls inside assistant content → tool.start
- * - 'toolResult' → tool.end
- * - internal messages (bashExecution / branchSummary / compactionSummary
- * / custom) → null (status / VM internals; not chat content)
- */
+   * Project an in-memory AgentMessage[] (already deserialized from the JSONL
+   * by SessionManager.open) into the same AgentEvent envelope the live event
+   * stream emits. Used at session registration time to give the renderer
+   * the historical conversation without re-parsing the JSONL ourselves.
+   *
+   * The discriminator is `msg.role`:
+   * - 'user' / 'assistant' → message.final
+   * - tool calls inside assistant content → tool.start
+   * - 'toolResult' → tool.end
+   * - internal messages (bashExecution / branchSummary / compactionSummary
+   * / custom) → null (status / VM internals; not chat content)
+   */
   replayFromMessages(messages: readonly AgentMessage[]): AgentEvent[] {
     const out: AgentEvent[] = [];
     // toolUse input 缓存:toolResult 消息不带调用参数,target 需从调用侧取。

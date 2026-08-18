@@ -82,11 +82,11 @@ export async function generateReview(
     /** 工作区路径:技能文件按工作区播种/读取。 */
     workspacePath: string;
     /**
- * 蒸馏通道(6.4):复盘成功后的记忆候选写入。缺省走共享 MemoryStore 单例
- * (shared-memory-store, 动态 import 装载);测试可注入假 store 验证蒸馏
- * 契约与失败静默。蒸馏失败(Err/抛错/store 不可用)一律静默,
- * 不影响 generateReview 的 Ok 结果与报告存档。
- */
+     * 蒸馏通道(6.4):复盘成功后的记忆候选写入。缺省走共享 MemoryStore 单例
+     * (shared-memory-store, 动态 import 装载);测试可注入假 store 验证蒸馏
+     * 契约与失败静默。蒸馏失败(Err/抛错/store 不可用)一律静默,
+     * 不影响 generateReview 的 Ok 结果与报告存档。
+     */
     proposeMemory?: (input: ProposeInput) => Promise<Result<MemoryEntry>> | Result<MemoryEntry>;
   },
 ): Promise<Result<ReviewMeta>> {

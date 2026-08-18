@@ -23,7 +23,7 @@ export interface RawSessionEntry {
     usage?: { totalTokens?: number };
   };
   /** SDK model_change 条目:统一为 'provider/modelId' 字符串(2026-08-14 起
- * 兼容 model 单字段新形状;旧 provider+modelId 形状在 collector 层归一)。 */
+   * 兼容 model 单字段新形状;旧 provider+modelId 形状在 collector 层归一)。 */
   modelChange?: { model: string };
 }
 

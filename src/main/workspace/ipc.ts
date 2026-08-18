@@ -93,10 +93,10 @@ export function registerWorkspaceHandlers(activation: WorkspaceActivation): void
   });
 
   /**
- * 移除最近工作区记录(设置页「最近工作区」列表)。
- * 不处理「移除激活工作区」:设置页 UI 对首项(激活项)不渲染移除按钮;
- * 移除激活项属实现错误,UI 层已禁止,无需 deactivate 逻辑。
- */
+   * 移除最近工作区记录(设置页「最近工作区」列表)。
+   * 不处理「移除激活工作区」:设置页 UI 对首项(激活项)不渲染移除按钮;
+   * 移除激活项属实现错误,UI 层已禁止,无需 deactivate 逻辑。
+   */
   ipcMain.handle(
     'lorra.workspace.remove',
     async (_e, args: { path: string }): Promise<WorkspaceListResult> => {

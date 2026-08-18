@@ -59,9 +59,9 @@ export interface SafetyInterceptorDeps {
     ok: boolean;
   }) => void;
   /**
- * write/edit 需审批时请求用户许可;返回的 Promise 由用户裁决 resolve:
- * allow → 放行工具,deny → 拦截器返回 block + terminate(停止当前轮)。
- */
+   * write/edit 需审批时请求用户许可;返回的 Promise 由用户裁决 resolve:
+   * allow → 放行工具,deny → 拦截器返回 block + terminate(停止当前轮)。
+   */
   requestApproval?: (payload: {
     toolName: string;
     target: string;
@@ -73,9 +73,9 @@ export interface SafetyInterceptorDeps {
   /** 可信读取路径注入(测试用);缺省 os.homedir。 */
   trustedPaths?: TrustedPathsOpts;
   /**
- * bash 嵌套执行器深度上限注入(测试用);缺省 MAX_BASH_NESTING。
- * 嵌套超限 = 无法静态审查 → 走审批卡(批准后原样执行),不是硬拦。
- */
+   * bash 嵌套执行器深度上限注入(测试用);缺省 MAX_BASH_NESTING。
+   * 嵌套超限 = 无法静态审查 → 走审批卡(批准后原样执行),不是硬拦。
+   */
   maxBashNesting?: number;
 }
 

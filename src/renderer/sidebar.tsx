@@ -23,9 +23,9 @@ interface SidebarProps {
   /** 切换工作区(底部工作区条)。 */
   onSwitchWorkspace?: () => void;
   /**
- * 当前工作区路径:作 FileTree 的 key,切换工作区时重挂载文件树,
- * 重新拉取新工作区内容(会话列表已按工作区刷新,文件树靠它同步)。
- */
+   * 当前工作区路径:作 FileTree 的 key,切换工作区时重挂载文件树,
+   * 重新拉取新工作区内容(会话列表已按工作区刷新,文件树靠它同步)。
+   */
   workspaceKey?: string;
 }
 

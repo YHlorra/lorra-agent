@@ -58,9 +58,9 @@ export interface CreateWebToolsOptions {
   /** MCP-backed client used to reach Exa (primary). */
   client: WebToolClient;
   /**
- * 备用搜索后端(Exa Err 时兜底;缺省不启用降级)。
- * 生产接线 = AnySearchClient(免 key 匿名公共端点,anysearch-client.ts)。
- */
+   * 备用搜索后端(Exa Err 时兜底;缺省不启用降级)。
+   * 生产接线 = AnySearchClient(免 key 匿名公共端点,anysearch-client.ts)。
+   */
   backupClient?: WebToolClient;
   /** Hard cap for text returned to the model. Default 12k chars. */
   maxResultChars?: number;

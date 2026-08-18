@@ -6,11 +6,11 @@ export interface SessionRecord {
   piSessionHandle: AgentSession;
   status: SessionStatus;
   /**
- * M1 (Oracle ): handle to unsubscribe from the AgentSession event
- * stream. Stored so subsequent `send` calls can detach the previous
- * subscription before attaching a new one — otherwise duplicate events
- * reach the router and seq numbering drifts.
- */
+   * M1 (Oracle ): handle to unsubscribe from the AgentSession event
+   * stream. Stored so subsequent `send` calls can detach the previous
+   * subscription before attaching a new one — otherwise duplicate events
+   * reach the router and seq numbering drifts.
+   */
   unsubscribe?: () => void;
   lastSeq: number;
 }

@@ -36,7 +36,7 @@ interface AppStoreState {
     enabled: boolean,
   ) => void;
   /** 数据源开关水合:启动/设置页打开时从 settings.json 读真源,
- * 只改 store 不触发 IPC 写回(与 setDataSource 的写路径分离)。 */
+   * 只改 store 不触发 IPC 写回(与 setDataSource 的写路径分离)。 */
   hydrateDataSources: (next: {
     claudeCode: boolean;
     opencode: boolean;

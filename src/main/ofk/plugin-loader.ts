@@ -29,10 +29,10 @@ export interface LoadedPlugin {
   runtime: string;
   description: string;
   /**
- * loader 包装后的安全版(内部 try/catch + 元素校验,永不 throw):
- * 返回**已补全**的 SessionFact[](registry 完成 schemaVersion/collector/
- * runtime/agentId/factId 与 start/end ISO → epoch 归一化)。
- */
+   * loader 包装后的安全版(内部 try/catch + 元素校验,永不 throw):
+   * 返回**已补全**的 SessionFact[](registry 完成 schemaVersion/collector/
+   * runtime/agentId/factId 与 start/end ISO → epoch 归一化)。
+   */
   collect(): Promise<Result<SessionFact[]>>;
   status: 'ok' | 'error';
   error?: string;

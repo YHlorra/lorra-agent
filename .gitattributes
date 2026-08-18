@@ -1,0 +1,4 @@
+# Normalize all text to LF: biome formatter (CI gate) requires LF; without
+# this, Windows checkouts (core.autocrlf=true) smudge blobs to CRLF and
+# `npx biome ci .` fails on every file. `text=auto` keeps binary detection.
+* text=auto eol=lf

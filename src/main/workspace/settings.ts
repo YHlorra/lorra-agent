@@ -29,9 +29,9 @@ export interface AppSettings {
   /** 界面语言:'en' 显式指定,其余(含 undefined)按 zh。 */
   language?: Lang;
   /**
- * 语义清洗专用模型:每日摘要/分类编译用的模型;
- * null/缺省 = 跟随默认模型。null 显式清除(= 回默认)。
- */
+   * 语义清洗专用模型:每日摘要/分类编译用的模型;
+   * null/缺省 = 跟随默认模型。null 显式清除(= 回默认)。
+   */
   compileModel?: { providerId: string; modelId: string } | null;
   /** 数据源开关:内置适配器启用;缺省 = 全关(pi 恒开不在此列)。 */
   dataSources?: { claudeCode?: boolean; opencode?: boolean; ohMyPi?: boolean; workbuddy?: boolean };

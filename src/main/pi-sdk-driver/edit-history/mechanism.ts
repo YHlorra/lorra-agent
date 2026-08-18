@@ -8,9 +8,9 @@ export interface EditMechanism {
   readonly kind: 'git' | 'snapshot';
 
   /**
- * 记录保存后调用:git 路径 commit 并回填 hash;snapshot 路径 no-op。
- * 抛错 = 提交失败(调用方 best-effort 吞掉,不阻断 AI 操作)。
- */
+   * 记录保存后调用:git 路径 commit 并回填 hash;snapshot 路径 no-op。
+   * 抛错 = 提交失败(调用方 best-effort 吞掉,不阻断 AI 操作)。
+   */
   finalize(record: EditRecord): Promise<{ commit: string; parentCommit: string }>;
 
   /** 复原:git 路径 restore+commit;snapshot 路径原子写回 before。抛错 = 复原失败。 */

@@ -38,10 +38,10 @@ export interface SessionFact {
   unfinished: boolean;
   containsTodo: boolean;
   /**
- * 会话大类(OFK 概念层附加,plan D2):pi-sdk 清洗不设置(undefined →
- * JSON.stringify 丢弃,factIdOf 不受影响);OFK 聚合(day-aggregate)从
- * 概念 frontmatter 写入。今日页按此分组,缺省归「未分类」。
- */
+   * 会话大类(OFK 概念层附加,plan D2):pi-sdk 清洗不设置(undefined →
+   * JSON.stringify 丢弃,factIdOf 不受影响);OFK 聚合(day-aggregate)从
+   * 概念 frontmatter 写入。今日页按此分组,缺省归「未分类」。
+   */
   category?: SessionCategory;
   // 隐私
   privacy: FactPrivacy;

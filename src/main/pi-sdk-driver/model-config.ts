@@ -179,8 +179,8 @@ export class ModelConfigAdapter {
   }
 
   /** Per-provider auth status (configured/source). Used by the ConnectView to
- * detect env-var presence without putting env-detected providers into the
- * "已连接" sidebar. */
+   * detect env-var presence without putting env-detected providers into the
+   * "已连接" sidebar. */
   getAuthStatus(providerId: string): {
     configured: boolean;
     source?:
