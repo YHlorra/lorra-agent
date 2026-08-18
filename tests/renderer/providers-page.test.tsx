@@ -10,7 +10,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { ProvidersPage } from '../../src/renderer/providers-page';
 import { useAppStore } from '@/lib/app-store';
-import type { LorraResult } from '../../src/shared/result';
+import type { SerializedResult } from '../../src/shared/result';
 import {
   ANTHROPIC_CONNECTED,
   OAUTH_ONLY,
@@ -232,7 +232,7 @@ describe('5.4 连接流程', () => {
       ] },
     );
     m.providers.list.mockResolvedValue({ ok: true, value: [ANTHROPIC_CONNECTED] });
-    let resolveTest!: (v: LorraResult<void>) => void;
+    let resolveTest!: (v: SerializedResult<void>) => void;
     m.providers.testConnection.mockImplementation(
       () => new Promise((resolve) => { resolveTest = resolve; }),
     );

@@ -1,3 +1,6 @@
+import { mkdir, rm, writeFile } from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import { LorraDriver, type SessionPersistence } from '../../src/main/pi-sdk-driver/driver';
 
@@ -6,8 +9,18 @@ import { LorraDriver, type SessionPersistence } from '../../src/main/pi-sdk-driv
 // driver-recall.test.ts 单独钉死;此处保持 send 原样转发)。
 vi.mock('../../src/main/memory/recall', () => ({
   RECALL_CONTEXT_MARKER: '<!-- lorra-memory-recall:reference-only -->',
+  buildCoreProjection: vi.fn(() => ({
+    text: '',
+    workspaceIdentity: 'workspace',
+    entryIds: [],
+  })),
+  buildCoreContext: vi.fn(() => ''),
   buildRecallContext: vi.fn(() => ''),
   stripRecallContext: (text: string) => text,
+}));
+
+vi.mock('../../src/main/memory/archival-resolver', () => ({
+  resolveArchivalRecall: vi.fn(async () => null),
 }));
 
 describe('LorraDriver.send', () => {
@@ -134,6 +147,63 @@ describe('LorraDriver.send', () => {
   });
 });
 
+describe('LorraDriver 重放稳定 messageId(回归:切回会话不重复追加)', () => {
+  // jsonl 真实形状:id 在 entry 层,message 对象内无 id(实测 10 个会话 589 条全如此)。
+  function makeReplayDriver() {
+    const events: Array<{ type: string; messageId?: string; role?: string }> = [];
+    const handle = {
+      sessionId: 'sid',
+      sessionManager: {
+        fileEntries: [
+          { type: 'session', id: 'entry-session' },
+          {
+            type: 'message',
+            id: 'entry-user-1',
+            message: { role: 'user', content: [{ type: 'text', text: '你好' }] },
+          },
+          {
+            type: 'message',
+            id: 'entry-asst-1',
+            message: { role: 'assistant', content: [{ type: 'text', text: '回答' }] },
+          },
+        ],
+      },
+      subscribe: vi.fn(() => () => undefined),
+      prompt: vi.fn(async () => {}),
+    };
+    const persistence = {
+      list: vi.fn().mockResolvedValue([{ id: 'sid', path: 'p' }]),
+      open: vi.fn().mockResolvedValue(handle),
+    } as unknown as SessionPersistence;
+    const driver = new LorraDriver({ workspacePath: 'C:/workspace', persistence });
+    driver.attachWebContents({
+      isDestroyed: () => false,
+      send: (_channel: string, event: unknown) =>
+        events.push(event as { type: string; messageId?: string; role?: string }),
+    } as never);
+    return { driver, events };
+  }
+
+  it('Given jsonl entry 层带 id When 重放 Then messageId 取 entry id(跨次打开稳定)', async () => {
+    const { driver, events } = makeReplayDriver();
+    await driver.openSession('sid');
+    const userEvents = events.filter((e) => e.type === 'message.final' && e.role === 'user');
+    expect(userEvents).toHaveLength(1);
+    expect(userEvents[0].messageId).toBe('entry-user-1');
+  });
+
+  it('Given 同一会话二次打开 When 重放 Then 事件 messageId 与首次完全一致(reducer 可折叠)', async () => {
+    const { driver, events } = makeReplayDriver();
+    await driver.openSession('sid');
+    const first = events.map((e) => ({ type: e.type, messageId: e.messageId }));
+    expect(first.length).toBeGreaterThan(0);
+    events.length = 0;
+    await driver.openSession('sid');
+    const second = events.map((e) => ({ type: e.type, messageId: e.messageId }));
+    expect(second).toEqual(first);
+  });
+});
+
 describe('LorraDriver.compact', () => {
   function makeDriver(compactImpl?: () => Promise<void>) {
     const compact = vi.fn(compactImpl ?? (async () => {}));
@@ -182,5 +252,112 @@ describe('LorraDriver.compact', () => {
     await driver.newSession();
 
     await expect(driver.compact('sid')).rejects.toThrow('Nothing to compact');
+  });
+});
+
+describe('LorraDriver.send 粘贴图片 → 视觉块', () => {
+  /** 1x1 像素合法 PNG(最小可解码文件字节)。 */
+  const PNG_1PX_BASE64 =
+    'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
+
+  function makeWorkspace(): { dir: string; pngPath: string; relPath: string } {
+    const dir = path.join(os.tmpdir(), `driver-img-${Math.random().toString(36).slice(2)}`);
+    const relPath = `.lorra/attachments/paste-test.png`;
+    const pngPath = path.join(dir, ...relPath.split('/'));
+    return { dir, pngPath, relPath };
+  }
+
+  async function makeVisionDriver(workspacePath: string, modelInput: string[]) {
+    const prompt = vi.fn(async (_text: string, _options?: unknown) => {});
+    const handle = {
+      sessionId: 'sid',
+      sessionManager: { fileEntries: [] },
+      subscribe: vi.fn(() => () => undefined),
+      prompt,
+      model: { input: modelInput },
+    };
+    const persistence = {
+      createInMemory: vi.fn().mockResolvedValue(handle),
+    } as unknown as SessionPersistence;
+    const driver = new LorraDriver({ workspacePath, persistence });
+    await driver.newSession();
+    return { driver, prompt };
+  }
+
+  it('Given 视觉模型 + 图片存在 When send 带 images Then prompt 以 options.images 传入图片视觉块', async () => {
+    const ws = makeWorkspace();
+    await mkdir(path.dirname(ws.pngPath), { recursive: true });
+    await writeFile(ws.pngPath, Buffer.from(PNG_1PX_BASE64, 'base64'));
+    try {
+      const { driver, prompt } = await makeVisionDriver(ws.dir, ['text', 'image']);
+      await driver.send('sid', '看图', [{ fileId: ws.relPath }]);
+
+      expect(prompt).toHaveBeenCalledTimes(1);
+      const firstCall = prompt.mock.calls[0] as
+        | [string, { images: Array<{ type: string; data: string; mimeType: string }> | undefined }]
+        | undefined;
+      const [textArg, options] = firstCall ?? ['', { images: undefined }];
+      const imageBlocks = options.images ?? [];
+      expect(textArg).toContain('看图');
+      expect(imageBlocks).toHaveLength(1);
+      expect(imageBlocks[0]).toMatchObject({
+        type: 'image',
+        mimeType: 'image/png',
+      });
+      expect(typeof imageBlocks[0].data).toBe('string');
+      // base64 解码回 PNG 魔数,证明是真实图片字节而非空串。
+      expect(Buffer.from(imageBlocks[0].data, 'base64')).not.toHaveLength(0);
+    } finally {
+      await rm(ws.dir, { recursive: true, force: true });
+    }
+  });
+
+  it('Given 非视觉模型 When send 带 images Then prompt 不传 images(退化纯文本)', async () => {
+    const ws = makeWorkspace();
+    await mkdir(path.dirname(ws.pngPath), { recursive: true });
+    await writeFile(ws.pngPath, Buffer.from(PNG_1PX_BASE64, 'base64'));
+    try {
+      const { driver, prompt } = await makeVisionDriver(ws.dir, ['text']);
+      await driver.send('sid', '看图', [{ fileId: ws.relPath }]);
+
+      expect(prompt).toHaveBeenCalledTimes(1);
+      const options = prompt.mock.calls[0]?.[1] as { images: unknown[] | undefined } | undefined;
+      expect(options?.images).toBeUndefined();
+    } finally {
+      await rm(ws.dir, { recursive: true, force: true });
+    }
+  });
+
+  it('Given 模型能力未知(测试桩无 model) When send 带 images Then 不传 images(行为与旧版一致)', async () => {
+    const prompt = vi.fn(async (_text: string, _options?: unknown) => {});
+    const handle = {
+      sessionId: 'sid',
+      sessionManager: { fileEntries: [] },
+      subscribe: vi.fn(() => () => undefined),
+      prompt,
+    };
+    const persistence = {
+      createInMemory: vi.fn().mockResolvedValue(handle),
+    } as unknown as SessionPersistence;
+    const driver = new LorraDriver({
+      workspacePath: os.tmpdir(),
+      persistence,
+    });
+    await driver.newSession();
+
+    await driver.send('sid', '你好', [{ fileId: '.lorra/attachments/none.png' }]);
+    const options = prompt.mock.calls[0]?.[1] as { images: unknown[] | undefined } | undefined;
+    expect(options?.images).toBeUndefined();
+  });
+
+  it('Given 视觉模型但图片文件缺失 When send 带 images Then fail-open:不阻塞发送、只发文本', async () => {
+    const ws = makeWorkspace();
+    const { driver, prompt } = await makeVisionDriver(ws.dir, ['text', 'image']);
+    await expect(driver.send('sid', '看图', [{ fileId: ws.relPath }])).resolves.toEqual({
+      accepted: true,
+    });
+
+    const options = prompt.mock.calls[0]?.[1] as { images: unknown[] | undefined } | undefined;
+    expect(options?.images).toBeUndefined();
   });
 });

@@ -13,6 +13,7 @@ export const SLASH_COMMANDS = [
   { name: 'hotkeys', descriptionKey: 'slash.hotkeys' as MessageKey, hint: '/hotkeys' },
   { name: 'copy', descriptionKey: 'slash.copy' as MessageKey, hint: '/copy' },
   { name: 'review', descriptionKey: 'slash.review' as MessageKey, hint: '/review' },
+  { name: 'skill', descriptionKey: 'slash.skill' as MessageKey, hint: '/skill' },
 ] as const;
 
 export type SlashCommandName = (typeof SLASH_COMMANDS)[number]['name'];
@@ -26,15 +27,16 @@ export type SlashCommandParse =
   | { kind: 'none' };
 
 /** 识别输入是否形如 /命令。整行纯命令才匹配(pi 行为:命令必须独占一行)。
- * /review 支持可选第二 token(/review weekly);其余命令带第二 token 不拦截(原行为)。
- * /review <其他> 解析为 command 但 arg 非法,由消费方(composer)拒绝。 */
+ * /review 支持可选第二 token(/review weekly);/skill 支持第二 token(技能名,
+ * kebab-case 与前端 `[a-z][a-z-]*` 一致);其余命令带第二 token 不拦截(原行为)。
+ * /review <其他> /skill <未知名> 解析为 command 但 arg 非法/未知,由消费方(composer)拒绝。 */
 export function parseSlashCommand(text: string): SlashCommandParse {
   const m = /^\/([a-z][a-z-]*)(?:\s+([a-z][a-z-]*))?$/i.exec(text.trim());
   if (!m) return { kind: 'none' };
   const name = m[1].toLowerCase();
   if (!SLASH_COMMANDS.some((c) => c.name === name)) return { kind: 'unknown', name };
   const arg = m[2]?.toLowerCase();
-  if (arg !== undefined && name !== 'review') return { kind: 'none' };
+  if (arg !== undefined && name !== 'review' && name !== 'skill') return { kind: 'none' };
   return arg === undefined
     ? { kind: 'command', name: name as SlashCommandName }
     : { kind: 'command', name: name as SlashCommandName, arg };

@@ -6,9 +6,6 @@ import {
 } from '../../shared/facts-schema';
 import {
   isSessionCategory,
-  SESSION_CATEGORIES,
-  SESSION_CATEGORY_LABELS,
-  type SessionCategory,
   type SessionConceptDoc,
   type TimelineSegment,
 } from '../../shared/ofk-schema';
@@ -49,8 +46,8 @@ function conceptToFact(doc: SessionConceptDoc): SessionFact | null {
     tools: doc.tools,
     unfinished: doc.unfinished,
     containsTodo: doc.containsTodo,
-    // 类别值不在枚举 → 'uncategorized'(与 stats 分区同口径)
-    category: isSessionCategory(doc.category) ? doc.category : 'uncategorized',
+    // 空串/非法值落 '未分类'(与 stats 分区同口径)
+    category: isSessionCategory(doc.category) ? doc.category : '未分类',
     privacy: isFactPrivacy(doc.privacy) ? doc.privacy : 'public_safe',
   };
   return { factId: factIdOf(base), ...base };
@@ -71,20 +68,26 @@ export function segmentsOfConcept(
   const span = conceptEnd > conceptStart ? conceptEnd - conceptStart : 0;
   const alloc = (segStart: number, segEnd: number): number =>
     span > 0 ? Math.round((concept.activeMs * (segEnd - segStart)) / span) : concept.activeMs;
-  const mk = (
-    category: SessionCategory,
-    start: number,
-    end: number,
-    summary?: string,
-  ): TimelineSegment => ({
+  // 块标题来源:LLM 段 summary > 概念 description(模型整会话归纳,编译写回)> 概念 title。
+  // description 与 title 相同(清洗播种初值,未编译过)时不视作归纳。
+  const conceptSummary =
+    concept.description.trim().length > 0 && concept.description !== concept.title
+      ? concept.description
+      : undefined;
+  const mk = (category: string, start: number, end: number, summary?: string): TimelineSegment => ({
     sessionRef: concept.sessionRef,
     workspace: concept.workspace,
     category,
+    collector: concept.collector,
     start,
     end,
     activeMs: alloc(start, end),
     title: concept.title,
-    ...(summary !== undefined ? { summary } : {}),
+    ...(summary !== undefined
+      ? { summary }
+      : conceptSummary !== undefined
+        ? { summary: conceptSummary }
+        : {}),
     unfinished: concept.unfinished,
     containsTodo: concept.containsTodo,
     model: concept.model,
@@ -127,7 +130,7 @@ export function segmentsOfConcept(
  * - workspaces 按工作区聚合 activeMs,着色稳定(token 名),按活跃时长降序
  * - segments 渲染段(LLM 段 > breaks 切段 > 单段),按 start 升序
  * - categories 按段统计(与渲染同源;count = 段数,totalActiveMs = 段 activeMs
- * 合计),按 SESSION_CATEGORIES 序,仅非空(非法值落 'uncategorized')
+ * 合计),按段 start 升序的首现顺序,label = tag 本身(空串/非法值落 '未分类')
  */
 export function summarizeOfkDay(
   concepts: SessionConceptDoc[],
@@ -161,27 +164,30 @@ export function summarizeOfkDay(
     .map(([name, total]) => ({ name, color: workspaceColor(name), totalActiveMs: total }))
     .sort((a, b) => b.totalActiveMs - a.totalActiveMs);
 
-  // categories 按渲染段统计(与今日页分区同源):count = 段数,totalActiveMs = 段合计
-  const byCategory = new Map<SessionCategory, { count: number; totalActiveMs: number }>();
+  // categories 按渲染段统计(与今日页分区同源):count = 段数,totalActiveMs = 段合计;
+  // 顺序 = 段按 start 升序的首现顺序;label = tag 本身(不再有六值枚举映射)。
+  const byCategory = new Map<string, { count: number; totalActiveMs: number }>();
+  const order: string[] = [];
   for (const seg of segments) {
-    const cat = isSessionCategory(seg.category) ? seg.category : 'uncategorized';
+    const cat = isSessionCategory(seg.category) ? seg.category : '未分类';
+    if (!byCategory.has(cat)) order.push(cat);
     const stat = byCategory.get(cat) ?? { count: 0, totalActiveMs: 0 };
     stat.count += 1;
     stat.totalActiveMs += seg.activeMs;
     byCategory.set(cat, stat);
   }
   const categories: Array<{
-    category: SessionCategory;
+    category: string;
     label: string;
     count: number;
     totalActiveMs: number;
   }> = [];
-  for (const cat of SESSION_CATEGORIES) {
+  for (const cat of order) {
     const stat = byCategory.get(cat);
     if (!stat) continue;
     categories.push({
       category: cat,
-      label: SESSION_CATEGORY_LABELS[cat],
+      label: cat,
       count: stat.count,
       totalActiveMs: stat.totalActiveMs,
     });

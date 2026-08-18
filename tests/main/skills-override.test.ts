@@ -15,7 +15,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 // additionalSkillPaths 动态加入自定义收集根(存在且不与既有两项重复)。
 //
 // electron mock:settings.ts 走 app.getPath('userData') 定位 settings.json;
-// session-persistence 传递依赖 trash-delete(shell)。userData 每测试指向临时目录。
+// session-persistence 传递依赖 tool-safety interceptor(shell)。userData 每测试指向临时目录。
 const electronMock = vi.hoisted(() => ({ userData: '' }));
 
 vi.mock('electron', () => ({

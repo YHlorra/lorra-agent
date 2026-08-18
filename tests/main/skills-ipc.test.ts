@@ -123,7 +123,7 @@ describe('skills-ipc(lorra.skills.*,D9 契约)', () => {
   // 通道注册
   // ---------------------------------------------------------------------
 
-  it('Requirement 通道注册:七通道名与 SKILLS_IPC 常量逐字一致(install 已迁移为会话工具)', () => {
+  it('Requirement 通道注册:八通道名与 SKILLS_IPC 常量逐字一致(install 已迁移为会话工具)', () => {
     expect(electronMock.handlers.has(SKILLS_IPC.xray)).toBe(true);
     expect(electronMock.handlers.has(SKILLS_IPC.setEnabled)).toBe(true);
     expect(electronMock.handlers.has(SKILLS_IPC.cleanDangling)).toBe(true);
@@ -131,6 +131,7 @@ describe('skills-ipc(lorra.skills.*,D9 契约)', () => {
     expect(electronMock.handlers.has(SKILLS_IPC.checkUpdates)).toBe(true);
     expect(electronMock.handlers.has(SKILLS_IPC.updateAll)).toBe(true);
     expect(electronMock.handlers.has(SKILLS_IPC.setWsEnabled)).toBe(true);
+    expect(electronMock.handlers.has(SKILLS_IPC.read)).toBe(true);
   });
 
   // ---------------------------------------------------------------------
@@ -141,8 +142,8 @@ describe('skills-ipc(lorra.skills.*,D9 契约)', () => {
     writeWorkspaceSkill(ws, 'alpha', 'alpha 描述');
 
     const res = await call<SkillXray>(SKILLS_IPC.xray);
-    expect(res.status).toBe('ok');
-    if (res.status !== 'ok') return;
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
     expect(res.value.workspacePath).toBe(wsReal);
     expect(res.value.skills.map((s) => s.name)).toContain('alpha');
     expect(res.value.skills.find((s) => s.name === 'alpha')?.enabled).toBe(true);
@@ -164,8 +165,8 @@ describe('skills-ipc(lorra.skills.*,D9 契约)', () => {
       writeWorkspaceSkill(stranger, 'beta', 'beta 描述');
 
       const res = await call<SkillXray>(SKILLS_IPC.xray, { wsPath: stranger });
-      expect(res.status).toBe('ok');
-      if (res.status !== 'ok') return;
+      expect(res.ok).toBe(true);
+      if (!res.ok) return;
       expect(res.value.workspacePath).toBe(realpathSync(stranger));
       expect(res.value.skills.map((s) => s.name)).toContain('beta');
     } finally {
@@ -175,8 +176,8 @@ describe('skills-ipc(lorra.skills.*,D9 契约)', () => {
 
   it('Scenario xray wsPath 非字符串 → IPC 层校验错误 invalid-workspace-path', async () => {
     const res = await call<SkillXray>(SKILLS_IPC.xray, { wsPath: 123 });
-    expect(res.status).toBe('error');
-    if (res.status === 'error') {
+    expect(res.ok).toBe(false);
+    if (!res.ok) {
       expect(res.error.code).toBe('invalid-workspace-path');
       expect(res.error.message).toContain('工作区路径无效');
     }
@@ -186,8 +187,8 @@ describe('skills-ipc(lorra.skills.*,D9 契约)', () => {
     const res = await call<SkillXray>(SKILLS_IPC.xray, {
       wsPath: path.join(home, 'no-such-ws'),
     });
-    expect(res.status).toBe('error');
-    if (res.status === 'error') {
+    expect(res.ok).toBe(false);
+    if (!res.ok) {
       expect(res.error.code).toBe('invalid-workspace-path');
       expect(res.error.message).toContain('工作区路径无效');
     }
@@ -201,7 +202,7 @@ describe('skills-ipc(lorra.skills.*,D9 契约)', () => {
     writeWorkspaceSkill(ws, 'alpha', 'alpha 描述');
 
     const res = await call<void>(SKILLS_IPC.setEnabled, { name: 'alpha', enabled: false });
-    expect(res.status).toBe('ok');
+    expect(res.ok).toBe(true);
     // 落盘实锤:直接读 settings.json 原文。
     const raw = JSON.parse(
       await readFile(path.join(electronMock.userData, 'settings.json'), 'utf8'),
@@ -211,8 +212,8 @@ describe('skills-ipc(lorra.skills.*,D9 契约)', () => {
 
   it('Scenario setEnabled name 非字符串 → 校验错误 invalid-skill-name(PM 语域)', async () => {
     const res = await call<void>(SKILLS_IPC.setEnabled, { name: 42, enabled: false });
-    expect(res.status).toBe('error');
-    if (res.status === 'error') {
+    expect(res.ok).toBe(false);
+    if (!res.ok) {
       expect(res.error.code).toBe('invalid-skill-name');
       expect(res.error.message).toContain('技能名称无效');
     }
@@ -220,8 +221,8 @@ describe('skills-ipc(lorra.skills.*,D9 契约)', () => {
 
   it('Scenario setEnabled name 空串 → 校验错误 invalid-skill-name', async () => {
     const res = await call<void>(SKILLS_IPC.setEnabled, { name: '', enabled: false });
-    expect(res.status).toBe('error');
-    if (res.status === 'error') {
+    expect(res.ok).toBe(false);
+    if (!res.ok) {
       expect(res.error.code).toBe('invalid-skill-name');
       expect(res.error.message).toContain('技能名称无效');
     }
@@ -229,14 +230,14 @@ describe('skills-ipc(lorra.skills.*,D9 契约)', () => {
 
   it('Scenario setEnabled name 缺失 → 校验错误', async () => {
     const res = await call<void>(SKILLS_IPC.setEnabled, { enabled: false });
-    expect(res.status).toBe('error');
-    if (res.status === 'error') expect(res.error.code).toBe('invalid-skill-name');
+    expect(res.ok).toBe(false);
+    if (!res.ok) expect(res.error.code).toBe('invalid-skill-name');
   });
 
   it('Scenario setEnabled enabled 非布尔 → 校验错误 invalid-enabled', async () => {
     const res = await call<void>(SKILLS_IPC.setEnabled, { name: 'alpha', enabled: 'yes' });
-    expect(res.status).toBe('error');
-    if (res.status === 'error') {
+    expect(res.ok).toBe(false);
+    if (!res.ok) {
       expect(res.error.code).toBe('invalid-enabled');
       expect(res.error.message).toContain('启用状态无效');
     }
@@ -244,8 +245,8 @@ describe('skills-ipc(lorra.skills.*,D9 契约)', () => {
 
   it('Scenario setEnabled 未知技能名 → manager skill-not-found 错误直通', async () => {
     const res = await call<void>(SKILLS_IPC.setEnabled, { name: 'no-such-skill', enabled: false });
-    expect(res.status).toBe('error');
-    if (res.status === 'error') {
+    expect(res.ok).toBe(false);
+    if (!res.ok) {
       expect(res.error.code).toBe('skill-not-found');
       expect(res.error.message).toContain('技能不存在');
     }
@@ -256,8 +257,8 @@ describe('skills-ipc(lorra.skills.*,D9 契约)', () => {
       name: 'memory-maintenance',
       enabled: false,
     });
-    expect(res.status).toBe('error');
-    if (res.status === 'error') {
+    expect(res.ok).toBe(false);
+    if (!res.ok) {
       expect(res.error.code).toBe('system-managed-skill');
       expect(res.error.message).toContain('系统管理');
     }
@@ -269,8 +270,8 @@ describe('skills-ipc(lorra.skills.*,D9 契约)', () => {
 
   it('Scenario cleanDangling 合法 wsPath(∈ recentWorkspaces)→ ok({cleaned})', async () => {
     const res = await call<{ cleaned: number }>(SKILLS_IPC.cleanDangling, { wsPath: ws });
-    expect(res.status).toBe('ok');
-    if (res.status === 'ok') expect(res.value).toEqual({ cleaned: 0 });
+    expect(res.ok).toBe(true);
+    if (res.ok) expect(res.value).toEqual({ cleaned: 0 });
   });
 
   it('Scenario cleanDangling 真实悬空链接 → cleaned=1 且链接已删', async () => {
@@ -282,8 +283,8 @@ describe('skills-ipc(lorra.skills.*,D9 契约)', () => {
     if (!ok) return; // 平台不支持断链创建 → 跳过。
 
     const res = await call<{ cleaned: number }>(SKILLS_IPC.cleanDangling, { wsPath: ws });
-    expect(res.status).toBe('ok');
-    if (res.status === 'ok') expect(res.value).toEqual({ cleaned: 1 });
+    expect(res.ok).toBe(true);
+    if (res.ok) expect(res.value).toEqual({ cleaned: 1 });
     expect(existsSync(path.join(ws, '.lorra', 'skills', 'ghost'))).toBe(false);
   });
 
@@ -291,8 +292,8 @@ describe('skills-ipc(lorra.skills.*,D9 契约)', () => {
     const res = await call<{ cleaned: number }>(SKILLS_IPC.cleanDangling, {
       wsPath: path.join(home, 'no-such-ws'),
     });
-    expect(res.status).toBe('error');
-    if (res.status === 'error') {
+    expect(res.ok).toBe(false);
+    if (!res.ok) {
       expect(res.error.code).toBe('invalid-workspace-path');
       expect(res.error.message).toContain('工作区路径无效');
     }
@@ -301,8 +302,8 @@ describe('skills-ipc(lorra.skills.*,D9 契约)', () => {
   it('Scenario cleanDangling 缺 wsPath / 非字符串 → invalid-workspace-path 校验错误', async () => {
     for (const args of [undefined, {}, { wsPath: 42 }]) {
       const res = await call<{ cleaned: number }>(SKILLS_IPC.cleanDangling, args);
-      expect(res.status).toBe('error');
-      if (res.status === 'error') {
+      expect(res.ok).toBe(false);
+      if (!res.ok) {
         expect(res.error.code).toBe('invalid-workspace-path');
         expect(res.error.message).toContain('工作区路径无效');
       }
@@ -315,8 +316,8 @@ describe('skills-ipc(lorra.skills.*,D9 契约)', () => {
     try {
       mkdirSync(path.join(stranger, '.git'), { recursive: true });
       const res = await call<{ cleaned: number }>(SKILLS_IPC.cleanDangling, { wsPath: stranger });
-      expect(res.status).toBe('error');
-      if (res.status === 'error') {
+      expect(res.ok).toBe(false);
+      if (!res.ok) {
         expect(res.error.code).toBe('unknown-workspace');
         expect(res.error.message).toContain('未知工作区');
       }
@@ -331,7 +332,7 @@ describe('skills-ipc(lorra.skills.*,D9 契约)', () => {
 
   it('Scenario setWsEnabled 合法参数 → workspaceSkillOverrides[wsRealpath] 名单写入并落盘', async () => {
     const res = await call<void>(SKILLS_IPC.setWsEnabled, { name: 'alpha', enabled: false });
-    expect(res.status).toBe('ok');
+    expect(res.ok).toBe(true);
 
     const raw = JSON.parse(
       await readFile(path.join(electronMock.userData, 'settings.json'), 'utf8'),
@@ -342,7 +343,7 @@ describe('skills-ipc(lorra.skills.*,D9 契约)', () => {
   it('Scenario setWsEnabled 恢复启用 → 名单移除', async () => {
     await call<void>(SKILLS_IPC.setWsEnabled, { name: 'alpha', enabled: false });
     const res = await call<void>(SKILLS_IPC.setWsEnabled, { name: 'alpha', enabled: true });
-    expect(res.status).toBe('ok');
+    expect(res.ok).toBe(true);
     const raw = JSON.parse(
       await readFile(path.join(electronMock.userData, 'settings.json'), 'utf8'),
     ) as { workspaceSkillOverrides?: Record<string, string[]> };
@@ -354,8 +355,8 @@ describe('skills-ipc(lorra.skills.*,D9 契约)', () => {
       name: 'daily-review',
       enabled: false,
     });
-    expect(res.status).toBe('error');
-    if (res.status === 'error') {
+    expect(res.ok).toBe(false);
+    if (!res.ok) {
       expect(res.error.code).toBe('system-managed-skill');
       expect(res.error.message).toContain('系统管理');
     }
@@ -368,15 +369,15 @@ describe('skills-ipc(lorra.skills.*,D9 契约)', () => {
       { enabled: false },
     ]) {
       const res = await call<void>(SKILLS_IPC.setWsEnabled, args);
-      expect(res.status).toBe('error');
-      if (res.status === 'error') expect(res.error.code).toBe('invalid-skill-name');
+      expect(res.ok).toBe(false);
+      if (!res.ok) expect(res.error.code).toBe('invalid-skill-name');
     }
   });
 
   it('Scenario setWsEnabled enabled 非布尔 → invalid-enabled', async () => {
     const res = await call<void>(SKILLS_IPC.setWsEnabled, { name: 'alpha', enabled: 'yes' });
-    expect(res.status).toBe('error');
-    if (res.status === 'error') expect(res.error.code).toBe('invalid-enabled');
+    expect(res.ok).toBe(false);
+    if (!res.ok) expect(res.error.code).toBe('invalid-enabled');
   });
 
   it('Scenario setWsEnabled wsPath 非法(非字符串)→ invalid-workspace-path', async () => {
@@ -385,8 +386,8 @@ describe('skills-ipc(lorra.skills.*,D9 契约)', () => {
       enabled: false,
       wsPath: 42,
     });
-    expect(res.status).toBe('error');
-    if (res.status === 'error') expect(res.error.code).toBe('invalid-workspace-path');
+    expect(res.ok).toBe(false);
+    if (!res.ok) expect(res.error.code).toBe('invalid-workspace-path');
   });
 
   // ---------------------------------------------------------------------
@@ -397,8 +398,8 @@ describe('skills-ipc(lorra.skills.*,D9 契约)', () => {
     const res = await call<{ moved: number; linked: number; conflicts: string[]; notes: string[] }>(
       SKILLS_IPC.collect,
     );
-    expect(res.status).toBe('ok');
-    if (res.status === 'ok') {
+    expect(res.ok).toBe(true);
+    if (res.ok) {
       expect(res.value).toMatchObject({ moved: 0, linked: 0, conflicts: [], notes: [] });
     }
   });
@@ -406,8 +407,8 @@ describe('skills-ipc(lorra.skills.*,D9 契约)', () => {
   it('Scenario collect wsPath 非法(非字符串/空串)→ invalid-workspace-path', async () => {
     for (const args of [{ wsPath: 42 }, { wsPath: '' }]) {
       const res = await call(SKILLS_IPC.collect, args);
-      expect(res.status).toBe('error');
-      if (res.status === 'error') expect(res.error.code).toBe('invalid-workspace-path');
+      expect(res.ok).toBe(false);
+      if (!res.ok) expect(res.error.code).toBe('invalid-workspace-path');
     }
   });
 
@@ -417,13 +418,93 @@ describe('skills-ipc(lorra.skills.*,D9 契约)', () => {
 
   it('Scenario checkUpdates 无参 → ok(状态表;无 git 技能 → 空表)', async () => {
     const res = await call<Record<string, unknown>>(SKILLS_IPC.checkUpdates);
-    expect(res.status).toBe('ok');
-    if (res.status === 'ok') expect(res.value).toEqual({});
+    expect(res.ok).toBe(true);
+    if (res.ok) expect(res.value).toEqual({});
   });
 
   it('Scenario updateAll 无参 → ok({updated:[],skipped:[]})', async () => {
     const res = await call<{ updated: string[]; skipped: string[] }>(SKILLS_IPC.updateAll);
-    expect(res.status).toBe('ok');
-    if (res.status === 'ok') expect(res.value).toEqual({ updated: [], skipped: [] });
+    expect(res.ok).toBe(true);
+    if (res.ok) expect(res.value).toEqual({ updated: [], skipped: [] });
+  });
+});
+
+// ---------------------------------------------------------------------
+// read(/skill 触发,2026-08-14)
+// ---------------------------------------------------------------------
+
+describe('skills-ipc read(lorra.skills.read,/skill 触发)', () => {
+  let home: string;
+  let ws: string;
+
+  beforeEach(async () => {
+    home = mkdtempSync(path.join(tmpdir(), 'lorra-sk-rd-'));
+    ws = path.join(home, 'work');
+    mkdirSync(path.join(ws, '.git'), { recursive: true });
+    electronMock.userData = mkdtempSync(path.join(tmpdir(), 'lorra-sk-rd-settings-'));
+    vi.stubEnv('LORRA_E2E_USERDATA', home);
+    vi.spyOn(os, 'homedir').mockReturnValue(home);
+    await writeSettings({ recentWorkspaces: [ws] });
+    electronMock.handlers.clear();
+    registerSkillsIpc();
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.restoreAllMocks();
+    electronMock.userData = '';
+    rmSync(home, { recursive: true, force: true, maxRetries: 10, retryDelay: 250 });
+  });
+
+  it('Scenario 已知技能 → 返回 SKILL.md 原文', async () => {
+    writeWorkspaceSkill(ws, 'alpha', 'alpha 描述');
+
+    const res = await call<{ name: string; content: string }>(SKILLS_IPC.read, {
+      name: 'alpha',
+    });
+    expect(res.ok).toBe(true);
+    if (res.ok) {
+      expect(res.value.name).toBe('alpha');
+      expect(res.value.content).toContain('---');
+      expect(res.value.content).toContain('alpha 描述');
+    }
+  });
+
+  it('Scenario 未知技能 → skill-not-found', async () => {
+    const res = await call<{ name: string; content: string }>(SKILLS_IPC.read, {
+      name: 'nope',
+    });
+    expect(res.ok).toBe(false);
+    if (!res.ok) {
+      expect(res.error.code).toBe('skill-not-found');
+      expect(res.error.message).toBe('技能不存在');
+    }
+  });
+
+  it('Scenario 非字符串/空技能名 → invalid-skill-name', async () => {
+    for (const bad of [undefined, '', 42]) {
+      const res = await call<{ name: string; content: string }>(SKILLS_IPC.read, { name: bad });
+      expect(res.ok).toBe(false);
+      if (!res.ok) {
+        expect(res.error.code).toBe('invalid-skill-name');
+        expect(res.error.message).toContain('技能名称无效');
+      }
+    }
+  });
+
+  it('Scenario 平铺 .md 技能 → 返回文件内容(名称 = 源根名,SDK fallbackName 语义)', async () => {
+    mkdirSync(path.join(ws, '.lorra', 'skills'), { recursive: true });
+    writeFileSync(path.join(ws, '.lorra', 'skills', 'flat.md'), '平铺技能正文', 'utf8');
+
+    // 平铺文件 name 回退父目录名(SDK loadSkillFromFile 同款,skills-store
+    // fallbackName):<ws>/.lorra/skills/flat.md → 名称「skills」。
+    const res = await call<{ name: string; content: string }>(SKILLS_IPC.read, {
+      name: 'skills',
+    });
+    expect(res.ok).toBe(true);
+    if (res.ok) {
+      expect(res.value.name).toBe('skills');
+      expect(res.value.content).toBe('平铺技能正文');
+    }
   });
 });

@@ -17,6 +17,12 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Dialog, DialogContent } from '@/components/ui/dialog';
 import { useAppStore } from '@/lib/app-store';
 import type { MessageKey } from '../shared/i18n-core';
+import type {
+  ArchivalAuditDto,
+  CoreProjectionDto,
+  OkfCheckResultDto,
+  WorkingMemorySnapshotDto,
+} from '../shared/memory-api';
 import {
   MEMORY_EVIDENCE_LABELS,
   MEMORY_KIND_LABELS,
@@ -25,7 +31,7 @@ import {
   type MemoryEvent,
   type MemoryKind,
 } from '../shared/memory-schema';
-import type { LorraError, LorraResult } from '../shared/result';
+import type { LorraError, SerializedResult } from '../shared/result';
 import { useT } from './lib/i18n';
 import { resolveWikilinks } from './lib/knowledge-links';
 import { SafeMarkdown } from './safe-markdown';
@@ -73,16 +79,23 @@ interface MemoryLists {
   links: MemoryLinkEdge[];
 }
 
-function listEvents(): Promise<LorraResult<MemoryEvent[]>> {
+interface LayeredMemoryAuditState {
+  core: CoreProjectionDto | null;
+  working: WorkingMemorySnapshotDto | null;
+  archival: ArchivalAuditDto | null;
+  sessionId: string | null;
+}
+
+function listEvents(): Promise<SerializedResult<MemoryEvent[]>> {
   const bridge = window.lorra.memory as unknown as {
-    listEvents(args: { entryId?: string }): Promise<LorraResult<MemoryEvent[]>>;
+    listEvents(args: { entryId?: string }): Promise<SerializedResult<MemoryEvent[]>>;
   };
   return bridge.listEvents({});
 }
 
-function listLinks(): Promise<LorraResult<MemoryLinkEdge[]>> {
+function listLinks(): Promise<SerializedResult<MemoryLinkEdge[]>> {
   const bridge = window.lorra.memory as unknown as {
-    listLinks(): Promise<LorraResult<MemoryLinkEdge[]>>;
+    listLinks(): Promise<SerializedResult<MemoryLinkEdge[]>>;
   };
   return bridge.listLinks();
 }
@@ -154,12 +167,55 @@ export function MemoryPage({ onBack }: MemoryPageProps): JSX.Element {
   /** :OFK 文档视图(entryId + 文档内容);切条目/切回记忆条目时清空。 */
   const [docView, setDocView] = useState<{ entryId: string; content: string } | null>(null);
   const [docError, setDocError] = useState<string | null>(null);
+  const [layeredAudit, setLayeredAudit] = useState<LayeredMemoryAuditState>({
+    core: null,
+    working: null,
+    archival: null,
+    sessionId: null,
+  });
+  const [okfAudit, setOkfAudit] = useState<OkfCheckResultDto | null>(null);
   // 编辑 dialog 状态。
   const [editing, setEditing] = useState<MemoryEntry | null>(null);
   const [draftTitle, setDraftTitle] = useState('');
   const [draftContent, setDraftContent] = useState('');
   const [draftBasis, setDraftBasis] = useState('');
   const [draftKind, setDraftKind] = useState<MemoryKind>('knowledge');
+
+  const loadLayeredAudit = useCallback(async (): Promise<void> => {
+    try {
+      const memory = window.lorra?.memory as unknown as {
+        getCoreProjection?: () => Promise<SerializedResult<CoreProjectionDto>>;
+        getWorkingMemory?: (
+          sessionId: string,
+        ) => Promise<SerializedResult<WorkingMemorySnapshotDto | null>>;
+        getArchivalAudit?: (
+          sessionId: string,
+        ) => Promise<SerializedResult<ArchivalAuditDto | null>>;
+      };
+      const coreRes = memory.getCoreProjection ? await memory.getCoreProjection() : null;
+      const workspace = await window.lorra.workspace.get();
+      const sessions =
+        workspace.path !== null
+          ? await window.lorra.session.list({ workspaceId: workspace.path })
+          : null;
+      const sessionId = sessions?.ok ? (sessions.value[0]?.id ?? null) : null;
+      const [workingRes, archivalRes] =
+        sessionId && memory.getWorkingMemory && memory.getArchivalAudit
+          ? await Promise.all([
+              memory.getWorkingMemory(sessionId),
+              memory.getArchivalAudit(sessionId),
+            ])
+          : [null, null];
+      setLayeredAudit({
+        core: coreRes?.ok ? coreRes.value : null,
+        working: workingRes?.ok ? workingRes.value : null,
+        archival: archivalRes?.ok ? archivalRes.value : null,
+        sessionId,
+      });
+    } catch {
+      setLayeredAudit({ core: null, working: null, archival: null, sessionId: null });
+    }
+  }, []);
 
   const load = useCallback(async (): Promise<void> => {
     setPhase('loading');
@@ -203,6 +259,7 @@ export function MemoryPage({ onBack }: MemoryPageProps): JSX.Element {
       });
       setError(null);
       setPhase('ready');
+      void loadLayeredAudit();
       // 默认选中第一条 active(右栏开箱即见内容)。
       setSelectedId((prev) => {
         if (prev && active.some((e) => e.entryId === prev)) return prev;
@@ -215,7 +272,7 @@ export function MemoryPage({ onBack }: MemoryPageProps): JSX.Element {
       });
       setPhase('error');
     }
-  }, [t]);
+  }, [loadLayeredAudit, t]);
 
   const didMount = useRef(false);
   useEffect(() => {
@@ -301,6 +358,29 @@ export function MemoryPage({ onBack }: MemoryPageProps): JSX.Element {
   }, [lists.active, lists.archived]);
 
   const selected = selectedId ? (entryById.get(selectedId) ?? null) : null;
+
+  useEffect(() => {
+    let cancelled = false;
+    async function run(): Promise<void> {
+      if (!selected?.ofkRef) {
+        setOkfAudit(null);
+        return;
+      }
+      const memory = window.lorra?.memory as unknown as {
+        okfCheck?: (path: string) => Promise<SerializedResult<OkfCheckResultDto>>;
+      };
+      if (!memory.okfCheck) {
+        setOkfAudit(null);
+        return;
+      }
+      const res = await memory.okfCheck(selected.ofkRef);
+      if (!cancelled) setOkfAudit(res.ok ? res.value : null);
+    }
+    void run();
+    return () => {
+      cancelled = true;
+    };
+  }, [selected?.ofkRef]);
 
   /** :查看 OFK 文档(记忆页跳转读取);加载失败 → 内联错误。 */
   const openDocument = useCallback(
@@ -682,6 +762,49 @@ export function MemoryPage({ onBack }: MemoryPageProps): JSX.Element {
                         {t}
                       </span>
                     ))}
+                  </div>
+                )}
+                {(layeredAudit.core ||
+                  layeredAudit.working ||
+                  layeredAudit.archival ||
+                  okfAudit) && (
+                  <div className="memory-layered-audit" data-testid="memory-layered-audit">
+                    {layeredAudit.core && (
+                      <div className="memory-layered-block" data-testid="memory-core-audit">
+                        <strong>Core</strong>
+                        <div>
+                          工作区：{layeredAudit.core.workspaceIdentity}；来源{' '}
+                          {layeredAudit.core.entryIds.length} 条
+                        </div>
+                      </div>
+                    )}
+                    {(layeredAudit.working || layeredAudit.archival) && (
+                      <div className="memory-layered-block" data-testid="memory-session-audit">
+                        <strong>Session</strong>
+                        {layeredAudit.working?.goal && <div>目标：{layeredAudit.working.goal}</div>}
+                        {layeredAudit.working && layeredAudit.working.constraints.length > 0 && (
+                          <div>约束：{layeredAudit.working.constraints.join('；')}</div>
+                        )}
+                        {layeredAudit.archival && (
+                          <div>
+                            召回：{layeredAudit.archival.triggeredBy}；
+                            {layeredAudit.archival.reason}
+                          </div>
+                        )}
+                      </div>
+                    )}
+                    {okfAudit && (
+                      <div className="memory-layered-block" data-testid="memory-okf-audit">
+                        <strong>OKF</strong>
+                        <div>
+                          {okfAudit.type ?? 'unknown'}；verified=
+                          {okfAudit.verified ? 'true' : 'false'}；问题 {okfAudit.issues.length} 项
+                        </div>
+                        {okfAudit.issues.slice(0, 3).map((issue) => (
+                          <div key={issue.code}>{issue.message}</div>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 )}
                 {docView?.entryId === selected.entryId ? (

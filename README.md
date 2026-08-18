@@ -19,10 +19,10 @@ collaborate with an AI agent side by side — with graded approval gates on ever
 
 ### v2
 
-- **Today page** — 24-hour timeline of your agent activity (per-workspace colored blocks, semantic segments, stacking), calendar navigation, and KPI cards.
+- **Today page** — 24-hour timeline of your agent activity (single track, tag-colored blocks in non-overlapping gantt columns, semantic segments, incremental LLM summaries), tag filtering, calendar navigation, and KPI cards.
 - **Review engine** — methodology files (`daily-review.md` / `deep-review.md`) drive model-generated day/week reviews, archived as readable Markdown.
 - **Skill management** — five-source skill discovery, per-workspace enable/disable, collection, and Git-based install/update, all from one page.
-- **Settings & i18n** — unified settings page (appearance, workspace, about) with instant Chinese/English switching.
+- **Settings & i18n** — unified settings page (appearance, workspace, data sources, tags, about) with instant Chinese/English switching.
 - **OFK knowledge layer** — sessions settle as readable Markdown concept docs; daily summaries compile from them; the timeline and review read directly from the document layer.
 
 ## Requirements

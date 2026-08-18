@@ -1,4 +1,4 @@
-import { FolderCog, Info, Palette, Plug } from 'lucide-react';
+import { FolderCog, Info, Palette, Plug, Tags } from 'lucide-react';
 import { type JSX, useCallback, useEffect, useState } from 'react';
 import { cn } from '@/lib/utils';
 import { useAppStore } from './lib/app-store';
@@ -7,11 +7,11 @@ import { SHORTCUTS } from './shortcuts-dialog';
 
 /**
  * 设置页(/ PRD 设置节):左栏分组导航 + 右面板,与模型配置页同构。
- * 分组:外观 / 工作区 / 关于(记忆分组不存在——记忆提取开关已取消,不建空分组)。
+ * 分组:外观 / 工作区 / 数据源 / 标签 / 关于。
  * 全部文案走 useT 词条,禁止硬编码。
  */
 
-type SettingsGroup = 'appearance' | 'workspace' | 'dataSources' | 'about';
+type SettingsGroup = 'appearance' | 'workspace' | 'dataSources' | 'tags' | 'about';
 
 export function SettingsPage(): JSX.Element {
   const t = useT();
@@ -22,6 +22,7 @@ export function SettingsPage(): JSX.Element {
     { id: 'appearance', label: t('settings.groups.appearance'), icon: Palette },
     { id: 'workspace', label: t('settings.groups.workspace'), icon: FolderCog },
     { id: 'dataSources', label: t('settings.groups.dataSources'), icon: Plug },
+    { id: 'tags', label: t('settings.groups.tags'), icon: Tags },
     { id: 'about', label: t('settings.groups.about'), icon: Info },
   ];
 
@@ -49,6 +50,7 @@ export function SettingsPage(): JSX.Element {
         {group === 'appearance' && <AppearanceSection />}
         {group === 'workspace' && <WorkspaceSection />}
         {group === 'dataSources' && <DataSourcesSection />}
+        {group === 'tags' && <TagsSection />}
         {group === 'about' &&
           (licensesOpen ? (
             <LicensesSection onBack={() => setLicensesOpen(false)} />
@@ -357,6 +359,99 @@ function DataSourcesSection(): JSX.Element {
           ))}
         </ul>
       )}
+    </div>
+  );
+}
+
+// ── 标签(2026-08-14 今日页标签分类改造)────────────────────────────────
+
+/**
+ * 标签管理:内置默认 + 用户自定义的完整列表(settings.get 真源);
+ * 每次增删即 settings.set({ tags }) 持久化并本地 setState。
+ * 输入 trim 后为空 / 与现有重复 → 忽略。
+ */
+function TagsSection(): JSX.Element {
+  const t = useT();
+  const [tags, setTags] = useState<string[]>([]);
+  const [input, setInput] = useState('');
+
+  // 挂载时读真源(settings.get;失败 → 空列表,不打断页面)。
+  useEffect(() => {
+    let cancelled = false;
+    void window.lorra.settings
+      .get()
+      .then((result) => {
+        if (!cancelled && result.ok) setTags(result.value.tags ?? []);
+      })
+      .catch(() => {
+        if (!cancelled) setTags([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const addTag = useCallback(() => {
+    const next = input.trim();
+    setInput('');
+    if (next === '' || tags.includes(next)) return;
+    const updated = [...tags, next];
+    setTags(updated);
+    void window.lorra.settings.set({ tags: updated }).catch(() => {
+      // fail-open:持久化失败不回滚本地态(下次打开恢复真源)。
+    });
+  }, [input, tags]);
+
+  const removeTag = useCallback(
+    (tag: string) => {
+      const updated = tags.filter((x) => x !== tag);
+      setTags(updated);
+      void window.lorra.settings.set({ tags: updated }).catch(() => {
+        // fail-open:同 addTag。
+      });
+    },
+    [tags],
+  );
+
+  return (
+    <div className="settings-rows">
+      <div className="settings-row-info settings-row-info-wide">
+        <span className="settings-row-title">{t('settings.groups.tags')}</span>
+        <span className="settings-row-desc">{t('settings.tags.desc')}</span>
+      </div>
+      <div className="settings-tags" data-testid="settings-tags">
+        {tags.map((tag) => (
+          <span key={tag} className="settings-tag" data-testid="tag-chip">
+            {tag}
+            <button
+              type="button"
+              className="settings-tag-remove"
+              aria-label={t('settings.tags.remove', { tag })}
+              onClick={() => removeTag(tag)}
+            >
+              ×
+            </button>
+          </span>
+        ))}
+        {tags.length === 0 && <p className="pc-muted">{t('settings.tags.empty')}</p>}
+      </div>
+      <div className="settings-tag-add">
+        <input
+          type="text"
+          className="settings-tag-input"
+          data-testid="tag-input"
+          placeholder={t('settings.tags.placeholder')}
+          aria-label={t('settings.tags.placeholder')}
+          value={input}
+          onChange={(e) => setInput(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') addTag();
+          }}
+        />
+        <button type="button" className="settings-choice" data-testid="tag-add" onClick={addTag}>
+          {t('settings.tags.add')}
+        </button>
+      </div>
     </div>
   );
 }

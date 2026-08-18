@@ -16,8 +16,41 @@ export interface WorkspaceFileCandidate {
 }
 
 /**
- * 工作区文件名搜索(@ 引用候选):递归 readdir,跳过 node_modules/.git/.pi
- * 与所有 `.` 开头隐藏项;文件名小写包含 query 即命中;收集满 limit 或扫完停止。
+ * 工作区文件树遍历单源:递归 readdir,跳过 node_modules/.git/.pi 与所有
+ * `.` 开头隐藏项;visit 返回 true 立即停止整棵遍历(搜索限流/精确命中共用)。
+ */
+async function walkWorkspaceFiles(
+  ws: string,
+  visit: (entry: { abs: string; fileId: string; name: string }) => boolean | void,
+): Promise<void> {
+  async function walk(dir: string, depth: number): Promise<boolean> {
+    if (depth > MAX_DEPTH) return false;
+    let entries: Dirent[];
+    try {
+      entries = await readdir(dir, { withFileTypes: true });
+    } catch {
+      return false; // 不可读目录静默跳过(防御)
+    }
+    for (const entry of entries) {
+      const name = entry.name;
+      if (name.startsWith('.')) continue; // .git/.pi/.env* 等隐藏项
+      const abs = path.join(dir, name);
+      if (entry.isDirectory()) {
+        if (SKIP_DIRS.has(name)) continue;
+        if (await walk(abs, depth + 1)) return true;
+      } else if (entry.isFile()) {
+        const fileId = path.relative(ws, abs).replace(/\\/g, '/');
+        if (visit({ abs, fileId, name })) return true;
+      }
+    }
+    return false;
+  }
+
+  await walk(ws, 0);
+}
+
+/**
+ * 工作区文件名搜索(@ 引用候选):文件名小写包含 query 即命中;收集满 limit 或扫完停止。
  */
 export async function searchWorkspaceFiles(
   ws: string,
@@ -26,30 +59,29 @@ export async function searchWorkspaceFiles(
 ): Promise<WorkspaceFileCandidate[]> {
   const q = query.toLowerCase();
   const results: WorkspaceFileCandidate[] = [];
-
-  async function walk(dir: string, depth: number): Promise<void> {
-    if (results.length >= limit || depth > MAX_DEPTH) return;
-    let entries: Dirent[];
-    try {
-      entries = await readdir(dir, { withFileTypes: true });
-    } catch {
-      return; // 不可读目录静默跳过(防御)
-    }
-    for (const entry of entries) {
-      if (results.length >= limit) return;
-      const name = entry.name;
-      if (name.startsWith('.')) continue; // .git/.pi/.env* 等隐藏项
-      const abs = path.join(dir, name);
-      if (entry.isDirectory()) {
-        if (SKIP_DIRS.has(name)) continue;
-        await walk(abs, depth + 1);
-      } else if (entry.isFile() && name.toLowerCase().includes(q)) {
-        const fileId = path.relative(ws, abs).replace(/\\/g, '/');
-        results.push({ fileId, name });
-      }
-    }
-  }
-
-  await walk(ws, 0);
+  await walkWorkspaceFiles(ws, ({ fileId, name }) => {
+    if (!name.toLowerCase().includes(q)) return false;
+    results.push({ fileId, name });
+    return results.length >= limit;
+  });
   return results;
+}
+
+/**
+ * 双链导航目标解析(2026-08-17):按文件名(去 .md/.markdown/.mdx 后缀、忽略
+ * 大小写)精确匹配工作区文件,返回第一个命中 fileId 或 null。深度/跳过规则同搜索。
+ */
+export async function resolveWikilinkFile(ws: string, name: string): Promise<string | null> {
+  const stem = name
+    .trim()
+    .replace(/\.(md|markdown|mdx)$/i, '')
+    .toLowerCase();
+  let hit: string | null = null;
+  await walkWorkspaceFiles(ws, ({ fileId, name: n }) => {
+    const nStem = n.replace(/\.(md|markdown|mdx)$/i, '').toLowerCase();
+    if (nStem !== stem) return false;
+    hit = fileId;
+    return true;
+  });
+  return hit;
 }

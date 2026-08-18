@@ -22,6 +22,11 @@ interface SidebarProps {
   onOpenPalette?: () => void;
   /** 切换工作区(底部工作区条)。 */
   onSwitchWorkspace?: () => void;
+  /**
+ * 当前工作区路径:作 FileTree 的 key,切换工作区时重挂载文件树,
+ * 重新拉取新工作区内容(会话列表已按工作区刷新,文件树靠它同步)。
+ */
+  workspaceKey?: string;
 }
 
 // 侧栏(design.md .1):文件树 + 会话管理统一区,Obsidian 式上下分区。
@@ -87,10 +92,12 @@ export const Sidebar = memo(function Sidebar(props: SidebarProps): JSX.Element {
           </button>
         </div>
         <ScrollArea className="min-h-0 flex-1 px-2 pb-2.5">
-          <nav aria-label={t('sidebar.sessionList')} className="flex flex-col gap-0.5">
+          {/* min-w-0:长无断行文本(会话标题/文件名)会撑爆 flex 项 min-width,溢出到中栏拦截点击
+ (PROB 会话栏无法切换根因)。min-w-0 让按钮可收缩到侧栏宽,span truncate 负责省略号。 */}
+          <nav aria-label={t('sidebar.sessionList')} className="flex min-w-0 flex-col gap-0.5">
             {props.activeSessionId && (
               <button className={navRow(true)} type="button">
-                <span className="w-full truncate text-[13px]">
+                <span className="w-full min-w-0 truncate text-[13px]">
                   {activeSummary?.firstMessage || t('sidebar.currentSession')}
                 </span>
                 <time className="text-[10px] text-ink-muted">
@@ -109,7 +116,7 @@ export const Sidebar = memo(function Sidebar(props: SidebarProps): JSX.Element {
                   type="button"
                   onClick={() => props.onOpenSession(session.id)}
                 >
-                  <span className="w-full truncate text-[13px]">
+                  <span className="w-full min-w-0 truncate text-[13px]">
                     {session.firstMessage || session.name || session.id}
                   </span>
                   <time className="text-[10px] text-ink-muted">
@@ -146,6 +153,7 @@ export const Sidebar = memo(function Sidebar(props: SidebarProps): JSX.Element {
         </div>
         <ScrollArea className="min-h-0 flex-1 px-2 pb-2.5">
           <FileTree
+            key={props.workspaceKey ?? WORKSPACE_ROOT_ID}
             rootId={WORKSPACE_ROOT_ID}
             selectedFileId={props.activeFileId}
             onSelect={props.onSelectFile}
@@ -177,7 +185,7 @@ export const Sidebar = memo(function Sidebar(props: SidebarProps): JSX.Element {
 
 function navRow(active: boolean): string {
   return cn(
-    'flex w-full flex-col items-start gap-0.5 rounded-kami px-2.5 py-2 text-left transition-colors hover:bg-paper/70',
+    'flex w-full min-w-0 flex-col items-start gap-0.5 rounded-kami px-2.5 py-2 text-left transition-colors hover:bg-paper/70',
     active && 'bg-overlay',
   );
 }

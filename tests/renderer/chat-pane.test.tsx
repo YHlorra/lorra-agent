@@ -89,6 +89,22 @@ describe('ChatPane 消息气泡 markdown 渲染策略', () => {
     expect(screen.getByText('乙')).toBeInTheDocument();
   });
 
+  it('Given assistant 消息含 GFM 表格 When 渲染 Then 表格被 .md-table-wrap 包裹(内部滚动,不撑破对话列)', () => {
+    renderChat({
+      events: [
+        messageEvent(
+          'message.final',
+          'assistant',
+          '| 列一 | 列二 |\n| --- | --- |\n| 甲 | 乙 |',
+        ),
+      ],
+    });
+
+    const table = screen.getByRole('table');
+    expect(table.closest('.md-table-wrap')).not.toBeNull();
+    expect(table.closest('.chat-stream')).not.toBeNull();
+  });
+
   it('Given user 消息含 markdown 字符 When 渲染 Then 保持纯文本（不渲染成 h2）', () => {
     renderChat({
       events: [messageEvent('message.final', 'user', '## 我手写 ## 当标题')],

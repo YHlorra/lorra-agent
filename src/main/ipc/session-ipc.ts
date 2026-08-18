@@ -14,7 +14,7 @@ export function registerSessionHandlers(getDriver: () => LorraDriver | null): vo
     const driver = getDriver();
     if (!driver) {
       return Promise.resolve({
-        status: 'error',
+        ok: false,
         error: { code: 'no-workspace', message: 'workspace not set' },
       });
     }
@@ -43,8 +43,10 @@ export function registerSessionHandlers(getDriver: () => LorraDriver | null): vo
     withDriver(async (driver) => driver.newSession()),
   );
 
-  ipcMain.handle('lorra.session.send', async (_e, args: { sessionId: string; text: string }) =>
-    withDriver(async (driver) => driver.send(args.sessionId, args.text)),
+  ipcMain.handle(
+    'lorra.session.send',
+    async (_e, args: { sessionId: string; text: string; images?: Array<{ fileId: string }> }) =>
+      withDriver(async (driver) => driver.send(args.sessionId, args.text, args.images)),
   );
 
   ipcMain.handle('lorra.session.abort', async (_e, args: { sessionId: string }) =>

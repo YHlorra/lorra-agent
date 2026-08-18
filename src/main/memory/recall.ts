@@ -8,10 +8,12 @@
  * 绝不抛异常、绝不阻塞会话启动(注入挂点拿到空串即原样发送)。
  */
 
+import path from 'node:path';
 import {
   MEMORY_EVIDENCE_LABELS,
   MEMORY_RECALL_TOP_K,
   type MemoryEntry,
+  type MemoryKind,
 } from '../../shared/memory-schema';
 import { getSharedMemoryStore } from './shared-memory-store';
 
@@ -21,6 +23,19 @@ export { RECALL_CONTEXT_MARKER, stripRecallContext } from '../../shared/recall-c
 
 /** 单条记忆内容注入时的最大字符数(design 6.6:截断 ~200 字)。 */
 export const RECALL_CONTENT_MAX_CHARS = 200;
+/** 常驻核心记忆条目上限(P1):只保留最稳定的少量规则/档案/偏好。 */
+export const CORE_MEMORY_MAX_ITEMS = 6;
+
+const CORE_KIND_PRIORITY: Record<MemoryKind, number> = {
+  hard_policy: 0,
+  user_profile: 1,
+  soft_preference: 2,
+  working_context: 3,
+  procedural_experience: 4,
+  knowledge: 5,
+  event: 6,
+  run_bound_feedback: 7,
+};
 
 export interface BuildRecallContextArgs {
   /** 当前工作区路径:recall 的 workspace 过滤键。 */
@@ -31,6 +46,18 @@ export interface BuildRecallContextArgs {
   query?: string;
 }
 
+export interface CoreProjection {
+  text: string;
+  workspaceIdentity: string;
+  entryIds: string[];
+}
+
+export interface RecallProjection {
+  text: string;
+  entryIds: string[];
+  ofkRefs: string[];
+}
+
 /**
  * 组装召回注入块。scope 传 'workspace' 单次查询即含 user 级全局条目
  * (user/agent 级恒命中 + 当前工作区 workspace/project 级匹配,由 store 保证)。
@@ -38,32 +65,83 @@ export interface BuildRecallContextArgs {
  * 无候选 → 返回空串(不注入任何内容)。
  */
 export function buildRecallContext(args: BuildRecallContextArgs): string {
+  return buildRecallProjection(args).text;
+}
+
+export function buildRecallProjection(args: BuildRecallContextArgs): RecallProjection {
   const k = args.k ?? MEMORY_RECALL_TOP_K;
   const query = args.query?.trim() || undefined;
   let entries: MemoryEntry[];
   try {
     const storeResult = getSharedMemoryStore();
-    if (storeResult.isErr()) return '';
+    if (storeResult.isErr()) return { text: '', entryIds: [], ofkRefs: [] };
     const recallResult = storeResult.value.recall({
       scope: 'workspace',
       workspace: args.workspace,
       k,
       ...(query !== undefined ? { query } : {}),
     });
-    if (recallResult.isErr()) return '';
+    if (recallResult.isErr()) return { text: '', entryIds: [], ofkRefs: [] };
     entries = recallResult.value;
   } catch {
     // fail-open:任何异常都视为无召回,绝不阻断会话启动
-    return '';
+    return { text: '', entryIds: [], ofkRefs: [] };
   }
-  if (entries.length === 0) return '';
+  if (entries.length === 0) return { text: '', entryIds: [], ofkRefs: [] };
   const hits = entries.slice(0, k).map((entry) => formatEntry(entry, query));
   const hops = entries.slice(k).map((entry) => {
     const content = truncateContent(entry.content);
     const label = MEMORY_EVIDENCE_LABELS[entry.evidence];
     return `- [${entry.kind}] ${entry.title}：${content}(${label}，关联页)`;
   });
-  return [...hits, ...hops].join('\n');
+  return {
+    text: [...hits, ...hops].join('\n'),
+    entryIds: entries.map((entry) => entry.entryId),
+    ofkRefs: Array.from(new Set(entries.map((entry) => entry.ofkRef).filter(Boolean))) as string[],
+  };
+}
+
+/**
+ * 常驻核心记忆(P1):每轮都注入的稳定小块。
+ * 只取最稳定的 hard_policy / user_profile / soft_preference + 当前工作区身份卡。
+ * ponytail: 工作区身份卡先只用目录名; 需要更多仓库事实时再单独编译。
+ */
+export function buildCoreProjection(workspace: string): CoreProjection {
+  const workspaceIdentity = path.basename(workspace) || workspace;
+  const lines = [`- [workspace_identity] 当前工作区：${workspaceIdentity}`];
+  try {
+    const storeResult = getSharedMemoryStore();
+    if (storeResult.isErr()) return { text: lines.join('\n'), workspaceIdentity, entryIds: [] };
+    const activeResult = storeResult.value.listActive();
+    if (activeResult.isErr()) return { text: lines.join('\n'), workspaceIdentity, entryIds: [] };
+    const entries = activeResult.value
+      .filter(
+        (entry) =>
+          entry.kind === 'hard_policy' ||
+          entry.kind === 'user_profile' ||
+          entry.kind === 'soft_preference',
+      )
+      .filter((entry) => entry.scope === 'user' || entry.workspace === workspace)
+      .sort(
+        (a, b) =>
+          CORE_KIND_PRIORITY[a.kind] - CORE_KIND_PRIORITY[b.kind] || b.updatedAt - a.updatedAt,
+      )
+      .slice(0, CORE_MEMORY_MAX_ITEMS);
+    if (entries.length === 0) {
+      return { text: lines.join('\n'), workspaceIdentity, entryIds: [] };
+    }
+    return {
+      text: [...lines, ...entries.map((entry) => formatEntry(entry))].join('\n'),
+      workspaceIdentity,
+      entryIds: entries.map((entry) => entry.entryId),
+    };
+  } catch {
+    return { text: lines.join('\n'), workspaceIdentity, entryIds: [] };
+  }
+}
+
+export function buildCoreContext(workspace: string): string {
+  return buildCoreProjection(workspace).text;
 }
 
 function formatEntry(entry: MemoryEntry, query?: string): string {

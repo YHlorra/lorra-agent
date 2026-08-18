@@ -5,6 +5,7 @@ import { Dialog, DialogContent } from '@/components/ui/dialog';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { useAppStore } from '@/lib/app-store';
 import { cn } from '@/lib/utils';
+import type { ExperienceAuditDto, OkfCheckResultDto } from '../shared/memory-api';
 import type { LorraError } from '../shared/result';
 import type {
   BudgetStatus,
@@ -21,7 +22,7 @@ import { SafeMarkdown } from './safe-markdown';
 /**
  * 技能管理页(2026-08-12-skill-manager V1-11 + 2026-08-13 技能收集批, ):
  *
- * 页头(标题 + 副标题 + 返回工作台;右侧操作:「收集散乱技能」
+ * 页头(标题 + 副标题 + 返回工作台(embedded 嵌入插件页时隐藏);右侧操作:「收集散乱技能」
  * 「检查更新」(behind 计数 >0 时出现「更新 N 个」);「清理悬空」仅当
  * xray.dangling 非空时出现;安装已迁移为对话内 install_skill 工具,页头保留引导文案)
  * + 5 统计卡并排(repeat(5,1fr)):全部 / 45 天用过 / 吃灰(已启用 ∧ 本工作区启用
@@ -46,6 +47,8 @@ export interface SkillsPageProps {
   onBack?: () => void;
   /** 打开工作区文件到中栏(App 传 openFileFromTool,现有 fs-ipc 打开链路)。 */
   onOpenFile?: (target: string) => void;
+  /** 嵌入插件页时隐藏页头返回钮(外层壳统一提供导航,2026-08-15)。 */
+  embedded?: boolean;
 }
 
 /** 入场 stagger:28ms/块,上限 340ms(设计稿动效参数,对齐今日页)。 */
@@ -65,6 +68,7 @@ const SOURCE_SUB_LABELS: Record<SkillSource, string> = {
   'lorra-global': 'lorra 库',
   user: '用户',
   ancestor: '祖先',
+  'agent-plugin': '插件',
 };
 
 /** 健康徽章短文案(code → PM 语域;未知 code 直出 message)。 */
@@ -83,14 +87,6 @@ const BUDGET_CAP: Record<BudgetStatus, string> = {
   over: '超过参考线 · 建议关闭技能或缩短描述',
 };
 
-/** 渲染层 IPC 响应兼容两种判别形状(preload 直透 SerializedResult + 既有 LorraResult 现状)。 */
-function unwrapRes<T>(res: unknown): { ok: true; value: T } | { ok: false; error: LorraError } {
-  const r = res as { status?: string; ok?: boolean; value?: T; error?: LorraError };
-  if (r.status === 'ok' && 'value' in r) return { ok: true, value: r.value as T };
-  if (r.ok === true && 'value' in r) return { ok: true, value: r.value as T };
-  return { ok: false, error: r.error ?? { code: 'internal', message: '技能通道返回异常' } };
-}
-
 /** 相对时间/日期;从未触发 → null 给「从未使用」高行动信号。 */
 function fmtLastUsed(ts: number | null): string {
   if (ts === null) return '从未使用';
@@ -104,7 +100,7 @@ function fmtLastUsed(ts: number | null): string {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 }
 
-export function SkillsPage({ onBack, onOpenFile }: SkillsPageProps): JSX.Element {
+export function SkillsPage({ onBack, onOpenFile, embedded }: SkillsPageProps): JSX.Element {
   const setPage = useAppStore((s) => s.setPage);
   const [phase, setPhase] = useState<'loading' | 'ready' | 'error'>('loading');
   const [error, setError] = useState<LorraError | null>(null);
@@ -127,11 +123,13 @@ export function SkillsPage({ onBack, onOpenFile }: SkillsPageProps): JSX.Element
     null,
   );
   const [updatingAll, setUpdatingAll] = useState(false);
+  const [experienceAudit, setExperienceAudit] = useState<ExperienceAuditDto | null>(null);
+  const [okfAudit, setOkfAudit] = useState<OkfCheckResultDto | null>(null);
 
   const fetchXray = useCallback(async (): Promise<SkillXray> => {
     const bridge = window.lorra?.skills;
     if (!bridge) throw new Error('技能通道不可用');
-    const res = unwrapRes<SkillXray>(await bridge.xray());
+    const res = await bridge.xray();
     if (!res.ok) throw res.error;
     return res.value;
   }, []);
@@ -192,9 +190,7 @@ export function SkillsPage({ onBack, onOpenFile }: SkillsPageProps): JSX.Element
       setActionError(null);
       setToggling((prev) => new Set(prev).add(skill.name));
       try {
-        const res = unwrapRes<void>(
-          await window.lorra.skills.setWsEnabled(skill.name, next, xray.workspacePath),
-        );
+        const res = await window.lorra.skills.setWsEnabled(skill.name, next, xray.workspacePath);
         if (!res.ok) {
           setActionError(res.error);
           return;
@@ -223,7 +219,7 @@ export function SkillsPage({ onBack, onOpenFile }: SkillsPageProps): JSX.Element
       setActionError(null);
       setToggling((prev) => new Set(prev).add(skill.name));
       try {
-        const res = unwrapRes<void>(await window.lorra.skills.setEnabled(skill.name, next));
+        const res = await window.lorra.skills.setEnabled(skill.name, next);
         if (!res.ok) {
           setActionError(res.error);
           return;
@@ -253,9 +249,7 @@ export function SkillsPage({ onBack, onOpenFile }: SkillsPageProps): JSX.Element
     setCleaning(true);
     setActionError(null);
     try {
-      const res = unwrapRes<{ cleaned: number }>(
-        await window.lorra.skills.cleanDangling(xray.workspacePath),
-      );
+      const res = await window.lorra.skills.cleanDangling(xray.workspacePath);
       if (!res.ok) {
         setActionError(res.error);
         return;
@@ -277,7 +271,7 @@ export function SkillsPage({ onBack, onOpenFile }: SkillsPageProps): JSX.Element
     setCollecting(true);
     setActionError(null);
     try {
-      const res = unwrapRes<CollectResult>(await window.lorra.skills.collect(xray.workspacePath));
+      const res = await window.lorra.skills.collect(xray.workspacePath);
       if (!res.ok) {
         setActionError(res.error);
         return;
@@ -299,9 +293,7 @@ export function SkillsPage({ onBack, onOpenFile }: SkillsPageProps): JSX.Element
     setCheckingUpdates(true);
     setActionError(null);
     try {
-      const res = unwrapRes<Record<string, SkillGitStatus>>(
-        await window.lorra.skills.checkUpdates(),
-      );
+      const res = await window.lorra.skills.checkUpdates();
       if (!res.ok) {
         setActionError(res.error);
         return;
@@ -322,9 +314,7 @@ export function SkillsPage({ onBack, onOpenFile }: SkillsPageProps): JSX.Element
     setUpdatingAll(true);
     setActionError(null);
     try {
-      const res = unwrapRes<{ updated: string[]; skipped: string[] }>(
-        await window.lorra.skills.updateAll(),
-      );
+      const res = await window.lorra.skills.updateAll();
       if (!res.ok) {
         setActionError(res.error);
         return;
@@ -407,12 +397,53 @@ export function SkillsPage({ onBack, onOpenFile }: SkillsPageProps): JSX.Element
       .map(([ws, count]) => ({ ws, count }));
   }, [selectedStats]);
 
+  useEffect(() => {
+    let cancelled = false;
+    async function loadAudit(): Promise<void> {
+      if (!selected) {
+        setExperienceAudit(null);
+        setOkfAudit(null);
+        return;
+      }
+      const memory = (
+        window.lorra as typeof window.lorra & {
+          memory?: {
+            getExperienceAudit?: (
+              nameOrId: string,
+            ) => Promise<{ ok: boolean; value?: ExperienceAuditDto | null }>;
+            okfCheck?: (path: string) => Promise<{ ok: boolean; value?: OkfCheckResultDto }>;
+          };
+        }
+      ).memory;
+      if (!memory) {
+        setExperienceAudit(null);
+        setOkfAudit(null);
+        return;
+      }
+      const [experienceRes, okfRes] = await Promise.all([
+        memory.getExperienceAudit
+          ? memory.getExperienceAudit(selected.name)
+          : Promise.resolve(null),
+        memory.okfCheck ? memory.okfCheck(selected.filePath) : Promise.resolve(null),
+      ]);
+      if (cancelled) return;
+      setExperienceAudit(experienceRes && experienceRes.ok ? (experienceRes.value ?? null) : null);
+      setOkfAudit(okfRes && okfRes.ok ? (okfRes.value ?? null) : null);
+    }
+    void loadAudit();
+    return () => {
+      cancelled = true;
+    };
+  }, [selected]);
+
   return (
     <main className="skills-page" data-testid="skills-page">
       <header className="skills-head">
-        <button type="button" className="back-btn" aria-label="返回工作台" onClick={handleBack}>
-          <ArrowLeft aria-hidden="true" />
-        </button>
+        {!embedded && (
+          <button type="button" className="back-btn" aria-label="返回工作台" onClick={handleBack}>
+            <ArrowLeft aria-hidden="true" />
+          </button>
+        )}
         <div className="head-title">
           <h1>技能管理</h1>
           {phase === 'ready' && hero.total > 0 && (
@@ -870,6 +901,29 @@ export function SkillsPage({ onBack, onOpenFile }: SkillsPageProps): JSX.Element
                   </li>
                 ))}
               </ul>
+            )}
+            {(experienceAudit || okfAudit) && (
+              <div className="sk-detail-provenance" data-testid="skills-detail-provenance">
+                {experienceAudit && (
+                  <>
+                    <div>
+                      {experienceAudit.generated ? 'generated skill' : '普通 skill'}；case:
+                      {experienceAudit.caseIds.join(', ') || '无'}；entry:
+                      {experienceAudit.entryIds.join(', ') || '无'}
+                    </div>
+                    {experienceAudit.warnings.length > 0 && (
+                      <div>警告：{experienceAudit.warnings.join('；')}</div>
+                    )}
+                  </>
+                )}
+                {okfAudit && (
+                  <div data-testid="skills-detail-okf">
+                    OKF：type={okfAudit.type ?? 'unknown'}；verified=
+                    {okfAudit.verified ? 'true' : 'false'}；问题 {okfAudit.issues.length} 项
+                    {okfAudit.issues.length > 0 ? `；${okfAudit.issues[0]?.message ?? ''}` : ''}
+                  </div>
+                )}
+              </div>
             )}
             <div className="sk-detail-stats" data-testid="skills-detail-stats">
               <div className="sk-detail-stat">

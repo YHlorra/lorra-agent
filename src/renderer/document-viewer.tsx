@@ -1,12 +1,12 @@
 import { Highlighter } from 'lucide-react';
-import type { JSX } from 'react';
+import type { JSX, MouseEvent as ReactMouseEvent } from 'react';
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { Annotation, AnnotationDraft } from '../shared/annotations';
 import { AnnotationLayer, anchorAround, findOverlappingAnnotation } from './annotation-layer';
 import { AnnotationPanel } from './annotation-panel';
 import { EpubViewer } from './epub-viewer';
 import { useT } from './lib/i18n';
-import { extractMarkdownMeta } from './lib/markdown-meta';
+import { extractMarkdownMeta, rewriteMetaFields } from './lib/markdown-meta';
 import { EditableMarkdown } from './markdown-editable';
 import { PdfViewer } from './pdf-viewer';
 import { SelectionToolbar } from './selection-toolbar';
@@ -33,6 +33,8 @@ interface DocumentViewerProps {
   onSaveContent: (content: string) => Promise<'saved' | 'conflict' | 'error'>;
   /** 编辑态变化通知(App 用它守卫 tool.end 自动重取)。 */
   onEditStateChange: (editing: boolean) => void;
+  /** 打开工作区文件(wikilink/相对路径 Ctrl+点击导航用)。 */
+  onOpenFile: (fileId: string) => void;
 }
 
 function isMarkdown(name: string | null): boolean {
@@ -62,6 +64,7 @@ export const DocumentViewer = memo(function DocumentViewer({
   onAskAi,
   onSaveContent,
   onEditStateChange,
+  onOpenFile,
 }: DocumentViewerProps): JSX.Element {
   const t = useT();
   const markdown = isMarkdown(fileName);
@@ -77,6 +80,18 @@ export const DocumentViewer = memo(function DocumentViewer({
   const markdownRef = useRef<HTMLDivElement>(null);
   const codeRef = useRef<HTMLPreElement>(null);
   const jumpNoticeTimer = useRef<number | null>(null);
+  // 标题/tag 就地编辑(2026-08-17):metaEditRef 是唯一事实源(防 blur→保存 与
+  // 切换编辑目标的竞态),metaEdit 只驱动渲染;metaCancelRef 拦 Esc 后的迟到 blur。
+  const [metaEdit, setMetaEdit] = useState<'title' | `tag-${number}` | null>(null);
+  const [metaDraft, setMetaDraft] = useState('');
+  const metaEditRef = useRef<'title' | `tag-${number}` | null>(null);
+  const metaCancelRef = useRef(false);
+  const metaSavingRef = useRef(false);
+  // 进入编辑态自动聚焦输入框(点标题/tag 后即可直接打字;单一 ref 即可,同一时刻只有一个 meta 输入框)。
+  const metaInputRef = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    if (metaEdit) metaInputRef.current?.focus();
+  }, [metaEdit]);
 
   // Obsidian 式文档头数据:frontmatter title/tags + 去掉首 H1 的正文。
   const meta = useMemo(
@@ -111,10 +126,59 @@ export const DocumentViewer = memo(function DocumentViewer({
   const handleEditStateChange = useCallback(
     (editing: boolean) => {
       setEditing(editing);
-      onEditStateChange(editing);
+      onEditStateChange(editing || metaEditRef.current !== null);
     },
     [onEditStateChange],
   );
+
+  /** 标题/tag 编辑态:与 body 编辑态合并上报(App 的 tool.end 守卫)。 */
+  const updateMetaEditing = useCallback(
+    (active: boolean) => {
+      onEditStateChange(active || editing);
+    },
+    [editing, onEditStateChange],
+  );
+
+  /** 进入标题/tag 编辑(草稿回填当前值)。 */
+  const beginMetaEdit = useCallback(
+    (kind: 'title' | `tag-${number}`, draft: string) => {
+      metaCancelRef.current = false;
+      metaEditRef.current = kind;
+      setMetaDraft(draft);
+      setMetaEdit(kind);
+      updateMetaEditing(true);
+    },
+    [updateMetaEditing],
+  );
+
+  /** 取消标题/tag 编辑(不保存)。 */
+  const cancelMetaEdit = useCallback(() => {
+    metaCancelRef.current = true;
+    metaEditRef.current = null;
+    setMetaEdit(null);
+    updateMetaEditing(false);
+  }, [updateMetaEditing]);
+
+  /** 提交标题/tag 编辑:patch frontmatter 后整篇保存;saved/conflict → 退出(内容由 App 刷新),error → 保留草稿可重试。 */
+  const commitMetaEdit = useCallback(async () => {
+    const kind = metaEditRef.current;
+    if (kind === null || metaSavingRef.current || !meta || !file.content) return;
+    metaSavingRef.current = true;
+    try {
+      const patch =
+        kind === 'title'
+          ? { title: metaDraft }
+          : { tags: meta.tags.map((tag, i) => (i === Number(kind.slice(4)) ? metaDraft : tag)) };
+      const outcome = await saveContent(rewriteMetaFields(file.content, patch));
+      if ((outcome === 'saved' || outcome === 'conflict') && metaEditRef.current === kind) {
+        metaEditRef.current = null;
+        setMetaEdit(null);
+        updateMetaEditing(false);
+      }
+    } finally {
+      metaSavingRef.current = false;
+    }
+  }, [meta, metaDraft, file.content, saveContent, updateMetaEditing]);
 
   const savedStateLabel =
     file.status === 'loading'
@@ -134,6 +198,42 @@ export const DocumentViewer = memo(function DocumentViewer({
     if (jumpNoticeTimer.current) window.clearTimeout(jumpNoticeTimer.current);
     jumpNoticeTimer.current = window.setTimeout(() => setJumpNotice(null), 2500);
   }, []);
+
+  /** Ctrl+点击导航(2026-08-17):双链 [[target]] → 工作区文件;外链 → 系统浏览器;相对路径 → 中栏。
+ * capture 阶段拦截,避免事件落到正文 BlockWrap 的就地编辑(Ctrl+点击链接不进编辑态)。 */
+  const handleNavClick = useCallback(
+    (e: ReactMouseEvent<HTMLElement>) => {
+      if (!(e.ctrlKey || e.metaKey)) return;
+      const el = e.target as HTMLElement;
+      const wl = el.closest('.wikilink');
+      if (wl instanceof HTMLElement && wl.dataset.target) {
+        e.preventDefault();
+        e.stopPropagation();
+        const name = wl.dataset.target;
+        void (async () => {
+          const res = await window.lorra.fs.resolveWikilink({ name });
+          if (res.ok && res.value.fileId) onOpenFile(res.value.fileId);
+          else showJumpNotice(t('doc.wikilinkMissing'));
+        })();
+        return;
+      }
+      const a = el.closest('a[data-href]');
+      if (a instanceof HTMLElement && a.dataset.href) {
+        const href = a.dataset.href;
+        if (/^(https?:\/\/|mailto:)/i.test(href)) {
+          e.preventDefault();
+          e.stopPropagation();
+          void window.lorra.app.openExternal(href);
+        } else if (/^\.{1,2}\/|^\//.test(href)) {
+          // 相对/绝对路径 → 中栏打开(剥 ./ 前缀,resolveId 按工作区相对解析)。
+          e.preventDefault();
+          e.stopPropagation();
+          onOpenFile(href.replace(/^\.{1,2}\//, '').replace(/^\/+/, ''));
+        }
+      }
+    },
+    [onOpenFile, showJumpNotice, t],
+  );
 
   /** 跳转 = 滚动到对应 mark 并闪一下;找不到 → 提示原文已变更。 */
   const jumpToAnnotation = useCallback(
@@ -225,6 +325,7 @@ export const DocumentViewer = memo(function DocumentViewer({
         ref={articleRef}
         className={`document${epub || pdf ? ' document-reader' : ''}`}
         lang="zh-CN"
+        onClickCapture={handleNavClick}
       >
         {file.status === 'ready' && file.content ? (
           epub && fileId ? (
@@ -247,14 +348,64 @@ export const DocumentViewer = memo(function DocumentViewer({
             <>
               {markdown && meta ? (
                 <header className="document-hed">
-                  <h1 className="document-title">{meta.title ?? fileName}</h1>
+                  {metaEdit === 'title' ? (
+                    <input
+                      ref={metaInputRef}
+                      className="document-title-input"
+                      value={metaDraft}
+                      onChange={(e) => setMetaDraft(e.target.value)}
+                      onBlur={() => {
+                        if (!metaCancelRef.current) void commitMetaEdit();
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') void commitMetaEdit();
+                        else if (e.key === 'Escape') cancelMetaEdit();
+                      }}
+                      aria-label={t('doc.titleInput')}
+                    />
+                  ) : (
+                    <h1 className="document-title">
+                      <button
+                        type="button"
+                        className="document-title-btn"
+                        onClick={() => beginMetaEdit('title', meta.title ?? '')}
+                      >
+                        {meta.title ?? fileName}
+                      </button>
+                    </h1>
+                  )}
                   {meta.tags.length > 0 ? (
                     <ul className="document-tags">
-                      {meta.tags.map((tag) => (
-                        <li key={tag} className="tag-pill">
-                          #{tag}
-                        </li>
-                      ))}
+                      {meta.tags.map((tag, i) =>
+                        metaEdit === `tag-${i}` ? (
+                          <li key={tag} className="tag-pill">
+                            <input
+                              ref={metaInputRef}
+                              className="tag-pill-input"
+                              value={metaDraft}
+                              onChange={(e) => setMetaDraft(e.target.value)}
+                              onBlur={() => {
+                                if (!metaCancelRef.current) void commitMetaEdit();
+                              }}
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter') void commitMetaEdit();
+                                else if (e.key === 'Escape') cancelMetaEdit();
+                              }}
+                              aria-label={t('doc.tagInput')}
+                            />
+                          </li>
+                        ) : (
+                          <li key={tag} className="tag-pill">
+                            <button
+                              type="button"
+                              className="tag-pill-btn"
+                              onClick={() => beginMetaEdit(`tag-${i}`, tag)}
+                            >
+                              #{tag}
+                            </button>
+                          </li>
+                        ),
+                      )}
                     </ul>
                   ) : null}
                 </header>

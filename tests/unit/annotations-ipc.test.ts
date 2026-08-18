@@ -30,13 +30,8 @@ function captureIpcHandlers(): IpcCall[] {
 
 /** IPC 信封收窄:handler 返回值是 SerializedResult<T> 纯数据,运行时校验后取 value。 */
 function okValue<T>(result: unknown): T {
-  if (
-    typeof result === 'object' &&
-    result !== null &&
-    'status' in result &&
-    result.status === 'ok'
-  ) {
-    return (result as { status: 'ok'; value: T }).value;
+  if (typeof result === 'object' && result !== null && 'ok' in result && result.ok === true) {
+    return (result as { ok: true; value: T }).value;
   }
   throw new Error(`expected ok result, got ${JSON.stringify(result)}`);
 }
@@ -100,13 +95,13 @@ describe('annotations IPC boundary', () => {
       ?.handler(null, {
         fileId,
       });
-    expect(result).toMatchObject({ status: 'error', error: { code: 'no-workspace' } });
+    expect(result).toMatchObject({ ok: false, error: { code: 'no-workspace' } });
   });
 
   it('lorra.annotations.list:未知 fileId → unknown-file', async () => {
     const h = await handlerOf('lorra.annotations.list');
     const result = await h?.(null, { fileId: 'bogus-id' });
-    expect(result).toMatchObject({ status: 'error', error: { code: 'unknown-file' } });
+    expect(result).toMatchObject({ ok: false, error: { code: 'unknown-file' } });
   });
 
   it('lorra.annotations.list:成功路径返回该文件(relPath 过滤后)的标注', async () => {
@@ -115,7 +110,7 @@ describe('annotations IPC boundary', () => {
 
     const h = await handlerOf('lorra.annotations.list');
     const result = await h?.(null, { fileId });
-    expect(result).toMatchObject({ status: 'ok' });
+    expect(result).toMatchObject({ ok: true });
     expect(okValue<Annotation[]>(result).map((a) => a.id)).toEqual(['mine']);
   });
 
@@ -125,7 +120,7 @@ describe('annotations IPC boundary', () => {
       fileId: 'bogus-id',
       annotation: makeDraft({ id: 'x' }),
     });
-    expect(result).toMatchObject({ status: 'error', error: { code: 'unknown-file' } });
+    expect(result).toMatchObject({ ok: false, error: { code: 'unknown-file' } });
   });
 
   it('lorra.annotations.save:成功路径回填 relPath 并落盘', async () => {
@@ -134,7 +129,7 @@ describe('annotations IPC boundary', () => {
       fileId,
       annotation: makeDraft({ id: 'new1' }),
     });
-    expect(result).toMatchObject({ status: 'ok' });
+    expect(result).toMatchObject({ ok: true });
 
     const list = await handlerOf('lorra.annotations.list');
     const listed = await list?.(null, { fileId });
@@ -147,7 +142,7 @@ describe('annotations IPC boundary', () => {
     await saveAnnotation(ws, makeAnn({ id: 'del1', relPath: 'a.md' }));
     const h = await handlerOf('lorra.annotations.remove');
     const result = await h?.(null, { fileId, id: 'del1' });
-    expect(result).toMatchObject({ status: 'ok' });
+    expect(result).toMatchObject({ ok: true });
 
     const list = await handlerOf('lorra.annotations.list');
     const listed = await list?.(null, { fileId });
@@ -157,7 +152,7 @@ describe('annotations IPC boundary', () => {
   it('lorra.annotations.remove:未知 fileId → unknown-file', async () => {
     const h = await handlerOf('lorra.annotations.remove');
     const result = await h?.(null, { fileId: 'bogus-id', id: 'x' });
-    expect(result).toMatchObject({ status: 'error', error: { code: 'unknown-file' } });
+    expect(result).toMatchObject({ ok: false, error: { code: 'unknown-file' } });
   });
 
   it('通道名遵守 lorra.* 白名单且不含 path 字段', () => {

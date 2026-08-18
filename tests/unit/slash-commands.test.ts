@@ -65,3 +65,29 @@ describe('parseSlashCommand /review', () => {
     expect(parseSlashCommand('/review weekly extra')).toEqual({ kind: 'none' });
   });
 });
+
+// /skill 触发(2026-08-14):第二 token = 技能名(kebab-case);arg 缺省 = 用法提示
+// (由 composer 拒绝并提示);其余命令带第二 token 不拦截(原行为不变)。
+describe('parseSlashCommand /skill', () => {
+  it('Given /skill <名> When 解析 Then 识别为命令,arg=技能名', () => {
+    expect(parseSlashCommand('/skill memory-maintenance')).toEqual({
+      kind: 'command',
+      name: 'skill',
+      arg: 'memory-maintenance',
+    });
+    expect(parseSlashCommand('  /skill   daily-review  ')).toEqual({
+      kind: 'command',
+      name: 'skill',
+      arg: 'daily-review',
+    });
+  });
+
+  it('Given /skill When 解析 Then 识别为命令,arg 缺省(composer 提示用法)', () => {
+    expect(parseSlashCommand('/skill')).toEqual({ kind: 'command', name: 'skill' });
+  });
+
+  it('Given 命令带第二 token(非 review/skill) When 解析 Then 不拦截(原行为)', () => {
+    expect(parseSlashCommand('/compact foo')).toEqual({ kind: 'none' });
+    expect(parseSlashCommand('/new x')).toEqual({ kind: 'none' });
+  });
+});

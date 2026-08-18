@@ -126,9 +126,16 @@ export function parseSessionJsonl(content: string): ParsedSessionFile {
         : undefined;
     const modelChange =
       record.type === 'model_change' &&
-      typeof record.provider === 'string' &&
-      typeof record.modelId === 'string'
-        ? { provider: record.provider, modelId: record.modelId }
+      (typeof record.model === 'string' ||
+        (typeof record.provider === 'string' && typeof record.modelId === 'string'))
+        ? {
+            // 2026-08-14:SDK 新形状 model 单字段("provider/modelId" 串);
+            // 旧形状 provider+modelId 兼容归一(行为不变)。
+            model:
+              typeof record.model === 'string'
+                ? record.model
+                : `${record.provider}/${record.modelId}`,
+          }
         : undefined;
     entries.push({
       id: record.id,

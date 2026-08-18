@@ -52,7 +52,7 @@ export function createCompileScheduler(deps: {
   }
 
   async function fire(dateISO: string): Promise<void> {
-    let entry = pending.get(dateISO);
+    const entry = pending.get(dateISO);
     if (!entry) return;
     entry.timer = null;
     while (entry) {

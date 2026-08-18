@@ -72,8 +72,9 @@ test.describe('技能管理页真机冒烟(隔离 profile)', () => {
         .getByRole('region', { name: '会话历史' })
         .waitFor({ state: 'visible', timeout: 60_000 });
 
-      // U1:进技能页,5 统计卡 + 表格行。
-      await win.getByRole('button', { name: '技能' }).click();
+      // U1:进技能页(nav.skills 于 2ab559b 改名「插件」:技能管理页并入插件页,
+      // 默认 pane=skills;选择器随命名跟迁),5 统计卡 + 表格行。
+      await win.getByRole('button', { name: '插件' }).click();
       await win.getByTestId('skills-page').waitFor({ timeout: 30_000 });
       await expect(win.locator('[data-testid="skills-hero-card"]')).toHaveCount(5);
       await expect(win.locator('[data-testid="skills-row"][data-name="smoke-local"]')).toBeVisible({

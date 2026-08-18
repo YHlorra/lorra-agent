@@ -1,3 +1,4 @@
+import { DEFAULT_TAGS } from '../../shared/ofk-schema';
 import type { Result } from '../../shared/result';
 import { err, ok } from '../../shared/result';
 import {
@@ -6,6 +7,7 @@ import {
   readDayConcepts,
   readDayDigestBodies,
 } from '../ofk/day-digest';
+import { readSettings } from '../workspace/settings';
 import { localDateString } from './day-summary';
 
 /**
@@ -123,6 +125,15 @@ export async function assembleReviewPayload(
   }
   const days = kind === 'daily' ? [dateISO] : weeklyWindow(dateISO).days;
 
+  // 标签列表入口读一次(settings.tags ?? 内置默认;fail-open 缺省)。
+  let tags: string[] = [...DEFAULT_TAGS];
+  try {
+    const settings = await readSettings();
+    tags = settings.tags ?? [...DEFAULT_TAGS];
+  } catch {
+    // fail-open:读设置失败用内置默认标签
+  }
+
   interface WorkspaceBucket {
     conversations: Array<{ digest: ConversationDigest; start: number }>;
     tokens: number;
@@ -133,7 +144,7 @@ export async function assembleReviewPayload(
   const byWorkspace = new Map<string, WorkspaceBucket>();
 
   for (const day of days) {
-    const compiled = await ensureDayCompiled(day);
+    const compiled = await ensureDayCompiled(day, { tags });
     if (compiled.isErr()) {
       console.error('[review-assembler] day digest compile failed:', compiled.error);
     }

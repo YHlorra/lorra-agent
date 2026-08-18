@@ -1,12 +1,13 @@
 import { Minus, Moon, PanelLeftClose, PanelLeftOpen, Square, Sun, X } from 'lucide-react';
 import type { JSX } from 'react';
-import { useCallback, useEffect, useReducer, useState } from 'react';
+import { useCallback, useEffect, useReducer, useRef, useState } from 'react';
 import { useAppStore } from '@/lib/app-store';
 import type { SlashCommandName } from '@/lib/slash-commands';
 import { applyThemeClass } from '@/lib/theme';
 import type { AgentEvent, SessionStatus } from '../shared/agent-events';
 import type { Annotation, AnnotationDraft } from '../shared/annotations';
-import type { LorraError } from '../shared/result';
+import type { LorraError, SerializedResult } from '../shared/result';
+import type { ReviewMeta } from '../shared/review-api';
 import { AppShell } from './app-shell';
 import { ChatPane } from './chat-pane';
 import { CommandPalette, useCommandPalette } from './command-palette';
@@ -15,32 +16,17 @@ import { type DocumentFileState, DocumentViewer } from './document-viewer';
 import { useT } from './lib/i18n';
 import { MemoryPage } from './memory-page';
 import { useChatModelState } from './model-hooks';
+import { PluginsPage } from './plugins-page';
 import { ProvidersPage } from './providers-page';
 import { initialReducerState, reducer } from './reducer';
 import { SettingsPage } from './settings-page';
 import { ShortcutsDialog } from './shortcuts-dialog';
 import { Sidebar } from './sidebar';
-import { SkillsPage } from './skills-page';
 import { TodayPage } from './today-page';
 import { WorkspaceTabs } from './workspace-tabs';
 import './styles.css';
 import { Group, Panel, Separator, useDefaultLayout } from 'react-resizable-panels';
 
-/** 复盘 IPC 信封解包（SerializedResult/LorraResult 双形状，composer/review-rail 同款）。 */
-function unwrapReviewEnvelope<T>(
-  res: unknown,
-  fallbackMessage: string,
-): { ok: true; value: T } | { ok: false; error: LorraError } {
-  const r = res as { status?: string; ok?: boolean; value?: T; error?: LorraError };
-  if ('status' in (r as object)) {
-    return r.status === 'ok' && 'value' in r
-      ? { ok: true, value: r.value as T }
-      : { ok: false, error: r.error ?? { code: 'internal', message: fallbackMessage } };
-  }
-  return r.ok === true && 'value' in r
-    ? { ok: true, value: r.value as T }
-    : { ok: false, error: r.error ?? { code: 'internal', message: fallbackMessage } };
-}
 const EMPTY_EVENTS: AgentEvent[] = [];
 
 export function App(): JSX.Element {
@@ -295,19 +281,47 @@ export function App(): JSX.Element {
   }, [sessionState?.events, activeSessionId, activeFileId, isEditingFile, refreshActiveFile]);
 
   const sendMessage = useCallback(
-    async (text: string) => {
-      if (!activeSessionId) return;
-      const res = await window.lorra.session.send({ sessionId: activeSessionId, text });
-      if (!res.ok) {
+    async (text: string, images?: Array<{ fileId: string }>) => {
+      if (!activeSessionId) return false;
+      const res = await window.lorra.session.send({ sessionId: activeSessionId, text, images });
+      // accepted:false = driver 忙碌拒收(session status 非 idle)。旧实现静默忽略
+      // (消息凭空丢失);现在显式报错,消息队列的出队逻辑据此解锁(见下方)。
+      if (!res.ok || !res.value.accepted) {
         dispatch({
           type: 'set-inline-error',
           sessionId: activeSessionId,
-          message: res.error.message,
+          message: res.ok ? '会话忙碌，消息未发出' : res.error.message,
         });
+        return false;
       }
+      return true;
     },
     [activeSessionId],
   );
+
+  // ---- 消息队列(2026-08-17):agent 忙碌时发送 → 入队,空闲后按序自动发出 ----
+  const [messageQueue, setMessageQueue] = useState<Array<{ id: string; text: string }>>([]);
+  // 出队锁:发队首后 streaming 事件到达前,status 仍是 idle、effect 会因队列变化
+  // 重跑 → 双发(第二条被 driver 拒收丢失)。锁住直到 busy=true(受理成功信号)。
+  // ponytail:受理成功但 streaming 事件丢失时会挂起队列(事件流故障场景,整 App
+  // 状态已坏,不单独兜底);受理失败由出队/立即发送路径显式解锁。
+  const dequeueLockRef = useRef(false);
+
+  /** 会话切换清队列:旧会话的排队消息不得发进新会话。 */
+  useEffect(() => {
+    setMessageQueue([]);
+    dequeueLockRef.current = false;
+  }, [activeSessionId]);
+
+  const queueMessage = useCallback((text: string) => {
+    setMessageQueue((q) => [...q, { id: crypto.randomUUID(), text }]);
+  }, []);
+  const removeQueuedMessage = useCallback((id: string) => {
+    setMessageQueue((q) => q.filter((item) => item.id !== id));
+  }, []);
+  const editQueuedMessage = useCallback((id: string, text: string) => {
+    setMessageQueue((q) => q.map((item) => (item.id === id ? { ...item, text } : item)));
+  }, []);
 
   /** diff 卡「接受」:标记编辑记录为已接受。 */
   const acceptEdit = useCallback(async (editId: string) => {
@@ -361,6 +375,20 @@ export function App(): JSX.Element {
     if (!activeSessionId) return;
     await window.lorra.session.abort({ sessionId: activeSessionId });
   }, [activeSessionId]);
+
+  /** 队列消息「立即发送」:abort 打断当前轮 → 直接 send(driver.abort resolve 时 agent 已停)。 */
+  const sendQueuedMessageNow = useCallback(
+    async (id: string) => {
+      const item = messageQueue.find((m) => m.id === id);
+      if (!item) return;
+      dequeueLockRef.current = true;
+      setMessageQueue((q) => q.filter((m) => m.id !== id));
+      await abortSession();
+      const accepted = await sendMessage(item.text);
+      if (!accepted) dequeueLockRef.current = false;
+    },
+    [messageQueue, abortSession, sendMessage],
+  );
 
   const switchWorkspace = useCallback(async () => {
     const result = await window.lorra.workspace.switch();
@@ -536,6 +564,27 @@ export function App(): JSX.Element {
     dispatch({ type: 'subscribe-session', sessionId: result.value.sessionId });
   }, []);
 
+  // ---- 消息队列出队(2026-08-17) ----
+  // 注:必须在下方 workspace picker 等早退 return 之前调用(hook 顺序恒定)。
+  const queueStatus: SessionStatus = sessionState?.status ?? 'idle';
+  const queueBusy = queueStatus === 'streaming' || queueStatus === 'tool-running';
+  // busy=true = 上一条已被 agent 受理 → 解锁出队判断(受理成功信号)。
+  useEffect(() => {
+    if (queueBusy) dequeueLockRef.current = false;
+  }, [queueBusy]);
+  // 空闲自动出队:严格 status==='idle'(aborted 不出队——用户刚打断,排队消息
+  // 不应立刻自动发出;剩余队列等下一轮 idle)。发队首后上锁,防事件到达前双发。
+  useEffect(() => {
+    if (queueStatus !== 'idle' || !activeSessionId || messageQueue.length === 0) return;
+    if (dequeueLockRef.current) return;
+    dequeueLockRef.current = true;
+    const head = messageQueue[0];
+    setMessageQueue((q) => q.slice(1));
+    void sendMessage(head.text).then((accepted) => {
+      if (!accepted) dequeueLockRef.current = false;
+    });
+  }, [queueStatus, activeSessionId, messageQueue, sendMessage]);
+
   /** `/compact`:委托主进程压缩上下文,成功后重开会话让 driver 重放压缩后消息。 */
   const compactSession = useCallback(async (): Promise<boolean> => {
     if (!activeSessionId) {
@@ -581,7 +630,7 @@ export function App(): JSX.Element {
 
   /** 命令面板 /review 入口（6.10 缝隙修复）：复用生成链路，三态文案同 composer。 */
   const runReviewFromPalette = useCallback(async (): Promise<void> => {
-    let res: unknown;
+    let res: SerializedResult<ReviewMeta> | undefined;
     try {
       res = await window.lorra?.review?.generate({ kind: 'daily' });
     } catch (err) {
@@ -592,12 +641,11 @@ export function App(): JSX.Element {
       setCommandNotice(t('app.notice.reviewUnavailable'));
       return;
     }
-    const unwrapped = unwrapReviewEnvelope(res, t('app.notice.reviewBadChannel'));
-    if (unwrapped.ok) {
+    if (res.ok) {
       setCommandNotice(t('app.notice.reviewGenerated'));
       return;
     }
-    const { error } = unwrapped;
+    const { error } = res;
     setCommandNotice(
       error.code === 'model-unavailable'
         ? t('app.notice.reviewNoModel')
@@ -753,9 +801,7 @@ export function App(): JSX.Element {
           <TodayPage onBack={returnToWorkspace} onOpenSession={openTodaySession} />
         )}
         {page === 'memory' && <MemoryPage onBack={returnToWorkspace} />}
-        {page === 'skills' && (
-          <SkillsPage onBack={returnToWorkspace} onOpenFile={openFileFromTool} />
-        )}
+        {page === 'skills' && <PluginsPage onOpenFile={openFileFromTool} />}
         {page === 'workspace' && (
           <>
             <a className="skip-link" href="#current-document">
@@ -788,6 +834,7 @@ export function App(): JSX.Element {
                       onSelectFile={handleSelectFile}
                       onOpenPalette={openPalette}
                       onSwitchWorkspace={onSwitchWorkspace}
+                      workspaceKey={workspacePath}
                     />
                   </Panel>
                   <Separator className="pane-handle" />
@@ -804,6 +851,7 @@ export function App(): JSX.Element {
                   onAskAi={handleAskAi}
                   onSaveContent={handleSaveContent}
                   onEditStateChange={setIsEditingFile}
+                  onOpenFile={openFileFromTool}
                 />
               </Panel>
               <Separator className="pane-handle" />
@@ -823,9 +871,15 @@ export function App(): JSX.Element {
                   onCommand={handleCommand}
                   references={references}
                   onClearReferences={() => setReferences([])}
+                  queue={messageQueue}
+                  onQueue={queueMessage}
+                  onQueueRemove={removeQueuedMessage}
+                  onQueueEdit={editQueuedMessage}
+                  onQueueSendNow={(id) => void sendQueuedMessageNow(id)}
                   onFileCandidates={fileCandidates}
                   onResolveFileRef={resolveFileRef}
                   onAppendReference={appendReference}
+                  workspacePath={workspacePath}
                   onOpenFile={openFileFromTool}
                   onAcceptEdit={acceptEdit}
                   onRevertEdit={revertEdit}

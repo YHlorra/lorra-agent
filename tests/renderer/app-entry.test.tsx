@@ -317,3 +317,124 @@ describe('7.3 入口跳转与空/正常态', () => {
     expect(screen.queryByText(/复盘生成超时/)).toBeNull();
   });
 });
+
+// 消息队列(2026-08-17 需求):agent 忙碌时发送 → 入队;空闲事件到达 → 队首自动发出;
+// 「立即发送」→ abort 打断 + 直接 send。经 events.subscribe 推 session.status 事件
+// 驱动 App 状态(与生产链路同源:SDK 事件 → EventRouter → wc.send → reducer)。
+describe('消息队列(App 集成)', () => {
+  let seq = 0;
+
+  async function setupQueueApp() {
+    const m = makeLorraMock();
+    m.session.continueRecent.mockResolvedValue({ ok: true, value: { sessionId: 'sess-q' } });
+    m.providers.catalog.mockResolvedValue({ ok: true, value: [] });
+    m.providers.list.mockResolvedValue({ ok: true, value: [] });
+    m.models.getAvailable.mockResolvedValue({
+      ok: true,
+      value: [
+        {
+          id: 'claude-x',
+          name: 'Claude X',
+          provider: 'anthropic',
+          contextWindow: 8192,
+          maxTokens: 1024,
+          reasoning: false,
+          enabled: true,
+          default: true,
+          available: true,
+        },
+      ],
+    });
+    m.models.getDefault.mockResolvedValue({
+      ok: true,
+      value: { providerId: 'anthropic', modelId: 'claude-x' },
+    });
+    let listener: ((event: unknown) => void) | undefined;
+    m.events.subscribe.mockImplementation((cb: (event: unknown) => void) => {
+      listener = cb;
+      return () => {};
+    });
+    Object.defineProperty(window, 'lorra', { value: m, writable: true, configurable: true });
+
+    const user = userEvent.setup();
+    render(<App />);
+    await waitForAppReady();
+    await waitFor(() => expect(listener).toBeDefined());
+    const pushStatus = (status: string) => {
+      seq += 1;
+      listener?.({
+        type: 'session.status',
+        sessionId: 'sess-q',
+        eventId: `ev-${seq}`,
+        seq,
+        ts: seq,
+        status,
+      });
+    };
+    return { m, user, pushStatus };
+  }
+
+  it('busy 时发送 → 入队不直发;空闲事件到达 → 队首自动发出、队列清空', async () => {
+    const { m, user, pushStatus } = await setupQueueApp();
+
+    // 1) 推忙碌 → 停止按钮出现(busy 生效)
+    pushStatus('streaming');
+    await screen.findByRole('button', { name: /停止/ });
+
+    // 2) 发送 → 入队(session.send 不被调),队列 UI 显示
+    const ta = screen.getByRole('textbox', { name: '向 Agent 提问' });
+    await user.type(ta, '排队消息一');
+    await user.click(screen.getByRole('button', { name: '发送' }));
+    expect(m.session.send).not.toHaveBeenCalled();
+    expect(await screen.findByText('排队消息一')).toBeInTheDocument();
+
+    // 3) 空闲事件 → 队首自动发出,队列清空
+    pushStatus('idle');
+    await waitFor(() =>
+      expect(m.session.send).toHaveBeenCalledWith(
+        expect.objectContaining({ sessionId: 'sess-q', text: '排队消息一' }),
+      ),
+    );
+    await waitFor(() => expect(screen.queryByText('排队消息一')).toBeNull());
+  });
+
+  it('队列消息「立即发送」→ abort 打断 + 直接 send', async () => {
+    const { m, user, pushStatus } = await setupQueueApp();
+
+    pushStatus('streaming');
+    await screen.findByRole('button', { name: /停止/ });
+
+    const ta = screen.getByRole('textbox', { name: '向 Agent 提问' });
+    await user.type(ta, '等不及的消息');
+    await user.click(screen.getByRole('button', { name: '发送' }));
+    expect(await screen.findByText('等不及的消息')).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: '立即发送' }));
+
+    await waitFor(() => expect(m.session.abort).toHaveBeenCalledWith({ sessionId: 'sess-q' }));
+    await waitFor(() =>
+      expect(m.session.send).toHaveBeenCalledWith(
+        expect.objectContaining({ sessionId: 'sess-q', text: '等不及的消息' }),
+      ),
+    );
+  });
+
+  it('撤回:busy 时入队 → 点撤回 → 队列移除、空闲后不发', async () => {
+    const { m, user, pushStatus } = await setupQueueApp();
+
+    pushStatus('streaming');
+    await screen.findByRole('button', { name: /停止/ });
+
+    const ta = screen.getByRole('textbox', { name: '向 Agent 提问' });
+    await user.type(ta, '说错的话');
+    await user.click(screen.getByRole('button', { name: '发送' }));
+    expect(await screen.findByText('说错的话')).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: '撤回' }));
+    await waitFor(() => expect(screen.queryByText('说错的话')).toBeNull());
+
+    pushStatus('idle');
+    await new Promise((r) => setTimeout(r, 150));
+    expect(m.session.send).not.toHaveBeenCalled();
+  });
+});

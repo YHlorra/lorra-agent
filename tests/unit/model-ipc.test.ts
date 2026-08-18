@@ -59,8 +59,8 @@ describe('model-ipc redact (runtime)', () => {
     const res = (await call('lorra.providers.connect', {
       providerId: 'anthropic',
       material: 'sk-abc123',
-    })) as { status: string; error: { message: string } };
-    expect(res.status).toBe('error');
+    })) as { ok: boolean; error: { message: string } };
+    expect(res.ok).toBe(false);
     expect(res.error.message).toContain('sk-***');
     expect(res.error.message).not.toContain('sk-abc123');
   });
@@ -70,8 +70,8 @@ describe('model-ipc redact (runtime)', () => {
     const res = (await call('lorra.providers.connect', {
       providerId: 'anthropic',
       material: 'x',
-    })) as { status: string; error: { message: string } };
-    expect(res.status).toBe('error');
+    })) as { ok: boolean; error: { message: string } };
+    expect(res.ok).toBe(false);
     expect(res.error.message).toContain('Bearer ***');
     expect(res.error.message).not.toContain('eyJhbGci');
   });
@@ -84,7 +84,7 @@ describe('model-ipc redact (runtime)', () => {
     const res = (await call('lorra.providers.connect', {
       providerId: 'anthropic',
       material: 'x',
-    })) as { status: string; error: { message: string } };
+    })) as { ok: boolean; error: { message: string } };
     expect(res.error.message).not.toContain('INVALIDKEY123');
     expect(res.error.message).toContain('apiKey=***');
   });
@@ -95,7 +95,7 @@ describe('model-ipc redact (runtime)', () => {
     );
     const res = (await call('lorra.providers.disconnect', {
       providerId: 'anthropic',
-    })) as { status: string; error: { message: string } };
+    })) as { ok: boolean; error: { message: string } };
     expect(res.error.message).not.toContain('mytoken123');
     expect(res.error.message).toContain('token: ***');
   });
@@ -113,10 +113,10 @@ describe('model-ipc redact (runtime)', () => {
     ];
     adapter.catalog.mockReturnValue(data);
     const res = (await call('lorra.providers.catalog')) as {
-      status: string;
+      ok: boolean;
       value: unknown;
     };
-    expect(res.status).toBe('ok');
+    expect(res.ok).toBe(true);
     expect(res.value).toEqual(data);
   });
 
@@ -128,8 +128,8 @@ describe('model-ipc redact (runtime)', () => {
       baseUrl: 'u',
       api: 'openai-completions',
       models: [],
-    })) as { status: string; error: { message: string } };
-    expect(res.status).toBe('error');
+    })) as { ok: boolean; error: { message: string } };
+    expect(res.ok).toBe(false);
     expect(res.error.message).not.toContain('sk-secret999');
   });
 

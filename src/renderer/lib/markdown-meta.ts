@@ -146,3 +146,57 @@ export function extractMarkdownMeta(full: string): MarkdownMeta {
 
   return { title, tags, body, toFull };
 }
+
+/**
+ * YAML 标量最小编码:仅含安全字符(Unicode 字母数字/空白/常见标点)时原样输出,
+ * 否则双引号包裹并转义——与 parseFrontmatterYaml 的读取约定互补,足够 Obsidian 兼容。
+ */
+function yamlScalar(value: string): string {
+  if (value === '') return '""';
+  // YAML 特殊字符(冒号/井号/引号/方括号/大括号等)或首尾空白 → 双引号包裹。
+  if (/[:#"'[\]{}&*!|>%@`,]|\n/.test(value) || /^\s|\s$/.test(value)) {
+    return `"${value.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
+  }
+  return value;
+}
+
+/**
+ * 重写全文 frontmatter 的 title/tags 字段(缺省字段追加,无 frontmatter 时顶部新建)。
+ * 与 extractMarkdownMeta 的读取约定互补:title 单行、tags 行内数组。其余 YAML 字段原样保留。
+ * ponytail: 内联 #tag(正文里)不在本次改写范围——它们属于正文 prose,与元数据标签语义不同。
+ */
+export function rewriteMetaFields(
+  full: string,
+  patch: { title?: string | null; tags?: string[] },
+): string {
+  const fm = /^---\r?\n([\s\S]*?)\r?\n---(\r?\n|$)/.exec(full);
+  if (!fm) {
+    const lines: string[] = ['---'];
+    if (patch.title != null && patch.title !== '') lines.push(`title: ${yamlScalar(patch.title)}`);
+    if (patch.tags && patch.tags.length > 0)
+      lines.push(`tags: [${patch.tags.map((t) => yamlScalar(t.replace(/^#/, ''))).join(', ')}]`);
+    lines.push('---', '');
+    return lines.join('\n') + full;
+  }
+  let yaml = fm[1];
+  if ('title' in patch) {
+    if (patch.title != null && patch.title !== '') {
+      const line = `title: ${yamlScalar(patch.title)}`;
+      yaml = /^title:\s*/m.test(yaml)
+        ? yaml.replace(/^title:\s*.*$/m, line)
+        : yaml === ''
+          ? line
+          : `${yaml}\n${line}`;
+    } else {
+      yaml = yaml.replace(/^title:\s*.*(?:\r?\n)?/m, '');
+    }
+  }
+  if ('tags' in patch) {
+    yaml = yaml.replace(/^tags:.*(?:\r?\n(?:[ \t]+-.*(?:\r?\n)?)*)?/m, '');
+    if (patch.tags && patch.tags.length > 0) {
+      const line = `tags: [${patch.tags.map((t) => yamlScalar(t.replace(/^#/, ''))).join(', ')}]`;
+      yaml = yaml === '' ? line : `${yaml}\n${line}`;
+    }
+  }
+  return `---\n${yaml}\n---${fm[2]}${full.slice(fm[0].length)}`;
+}

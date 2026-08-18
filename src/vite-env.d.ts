@@ -20,7 +20,7 @@ interface LorraWorkspaceApi {
   remove(path: string): Promise<{ workspaces: string[] }>;
 }
 
-type RpcEnvelope<T> = import('./shared/result').LorraResult<T>;
+type RpcEnvelope<T> = import('./shared/result').SerializedResult<T>;
 
 interface LorraSessionInfo {
   id: string;
@@ -41,6 +41,7 @@ interface LorraSessionApi {
   send(args: {
     sessionId: string;
     text: string;
+    images?: Array<{ fileId: string }>;
   }): Promise<RpcEnvelope<{ accepted: boolean; busySessionId?: string }>>;
   abort(args: { sessionId: string }): Promise<RpcEnvelope<true>>;
   compact(args: { sessionId: string }): Promise<RpcEnvelope<{ accepted: boolean }>>;
@@ -71,8 +72,12 @@ interface LorraFsApi {
     content: string;
     baseMtime?: number;
   }): Promise<RpcEnvelope<{ mtime: number }>>;
+  /** 拖拽文件 → 磁盘绝对路径(Electron webUtils,2026-08-14;替代已移除的 File.path)。 */
+  getPathForFile(file: File): string;
   /** 素材消化(3b 6.13):系统对话框选文件,取消返回 null。 */
   pickFile(): Promise<RpcEnvelope<string | null>>;
+  /** 双链目标查找(2026-08-17):按名字在工作区解析 [[target]] → 文件 id;无匹配返回 null。 */
+  resolveWikilink(args: { name: string }): Promise<RpcEnvelope<{ fileId: string | null }>>;
 }
 
 // Annotation DTO 与 src/shared/annotations.ts 同源(renderer 可直连共享类型)。
@@ -199,6 +204,8 @@ interface LorraAppApi {
   info(): Promise<{ version: string; name: string }>;
   /** 开源项目清单(设置页「关于 → 开源项目」数据源)。 */
   licenses(): Promise<OpenSourceProject[]>;
+  /** 用系统默认浏览器打开外链(2026-08-17;仅放行 https/http/mailto)。 */
+  openExternal(url: string): Promise<boolean>;
 }
 
 /** 开源项目条目(与 src/shared/licenses-api.ts 同构,inline 声明风格)。 */
@@ -218,6 +225,7 @@ interface LorraSettingsApi {
       defaultHideThinking: boolean;
       compileModel: { providerId: string; modelId: string } | null;
       dataSources: { claudeCode: boolean; opencode: boolean; ohMyPi: boolean; workbuddy: boolean };
+      tags: string[];
     }>
   >;
   set(args: {
@@ -231,6 +239,7 @@ interface LorraSettingsApi {
       ohMyPi?: boolean;
       workbuddy?: boolean;
     };
+    tags?: string[];
   }): Promise<RpcEnvelope<void>>;
 }
 
@@ -300,6 +309,23 @@ interface LorraSkillsApi {
     enabled: boolean,
     wsPath?: string,
   ): Promise<import('./shared/result').SerializedResult<void>>;
+  // 2026-08-14 /skill 触发:读取技能文件原文(composer 拼 prompt 后走正常发送)。
+  read(
+    name: string,
+  ): Promise<
+    import('./shared/result').SerializedResult<import('./shared/skills-api').SkillReadResult>
+  >;
+}
+
+// ── 输入栏剪贴板(2026-08-14 粘贴图片)──
+// 契约类型单一事实源 src/main/ipc/clipboard-ipc.ts(SavedClipboardImage);
+// 信封 = SerializedResult(与 today/skills 同款直透)。
+interface LorraClipboardApi {
+  saveImage(): Promise<
+    import('./shared/result').SerializedResult<
+      import('./main/ipc/clipboard-ipc').SavedClipboardImage
+    >
+  >;
 }
 
 // ── 记忆页(memory-page, 6.9 / )──
@@ -333,6 +359,17 @@ interface LorraMemoryApi {
   ): Promise<RpcEnvelope<{ entryId: string }>>;
   /** 知识库文档读取:path 为 bundle 相对路径。 */
   readDocument(path: string): Promise<RpcEnvelope<{ content: string | null }>>;
+  getCoreProjection(): Promise<RpcEnvelope<import('./shared/memory-api').CoreProjectionDto>>;
+  getWorkingMemory(
+    sessionId: string,
+  ): Promise<RpcEnvelope<import('./shared/memory-api').WorkingMemorySnapshotDto | null>>;
+  getArchivalAudit(
+    sessionId: string,
+  ): Promise<RpcEnvelope<import('./shared/memory-api').ArchivalAuditDto | null>>;
+  getExperienceAudit(
+    nameOrId: string,
+  ): Promise<RpcEnvelope<import('./shared/memory-api').ExperienceAuditDto | null>>;
+  okfCheck(path: string): Promise<RpcEnvelope<import('./shared/memory-api').OkfCheckResultDto>>;
 }
 
 type Lang = import('./shared/i18n-core').Lang;
@@ -354,7 +391,9 @@ interface LorraApi {
   review: LorraReviewApi;
   memory: LorraMemoryApi;
   skills: LorraSkillsApi;
+  clipboard: LorraClipboardApi;
   plugins: LorraPluginsApi;
+  agentPlugins: LorraAgentPluginsApi;
 }
 
 interface LorraPluginsApi {
@@ -369,6 +408,48 @@ interface LorraPluginsApi {
         error?: string;
       }>;
     }>
+  >;
+}
+
+// ── agent-plugins 管理(plan S2/S4):插件态/MCP 态数据 + 启停/增删 ──
+// 契约类型单一事实源 src/shared/plugins-api.ts;信封 = SerializedResult(与 skills 同款直透)。
+interface LorraAgentPluginsApi {
+  xray(
+    wsPath?: string,
+  ): Promise<
+    import('./shared/result').SerializedResult<import('./shared/plugins-api').PluginsXray>
+  >;
+  setPluginEnabled(
+    name: string,
+    enabled: boolean,
+  ): Promise<import('./shared/result').SerializedResult<void>>;
+  mcpAdd(
+    id: string,
+    config: import('./shared/plugins-api').McpServerConfig,
+  ): Promise<import('./shared/result').SerializedResult<void>>;
+  mcpRemove(id: string): Promise<import('./shared/result').SerializedResult<void>>;
+  mcpSetEnabled(
+    id: string,
+    enabled: boolean,
+  ): Promise<import('./shared/result').SerializedResult<void>>;
+  mcpTest(
+    id: string,
+  ): Promise<
+    import('./shared/result').SerializedResult<import('./shared/plugins-api').McpTestResult>
+  >;
+  importFolder(
+    source: string,
+  ): Promise<
+    import('./shared/result').SerializedResult<
+      import('./shared/plugins-api').InstallAgentPluginResult
+    >
+  >;
+  create(
+    name: string,
+  ): Promise<
+    import('./shared/result').SerializedResult<
+      import('./shared/plugins-api').CreateAgentPluginResult
+    >
   >;
 }
 

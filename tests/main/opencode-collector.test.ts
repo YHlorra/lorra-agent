@@ -4,8 +4,8 @@ import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
-  OPENCODE_RUNTIME,
   createOpencodeCollector,
+  OPENCODE_RUNTIME,
   opencodeDataDir,
 } from '../../src/main/ofk/builtin-collectors/opencode';
 import { readSyncState, updateSyncState } from '../../src/main/ofk/sync-state';

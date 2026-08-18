@@ -1,12 +1,12 @@
 import path from 'node:path';
 import { ipcMain } from 'electron';
 import type { SessionConceptDoc } from '../../shared/ofk-schema';
-import { parseSessionConcept } from '../../shared/ofk-schema';
+import { DEFAULT_TAGS, parseSessionConcept } from '../../shared/ofk-schema';
 import type { SerializedResult } from '../../shared/result';
 import { toLorraError } from '../../shared/result';
 import { localDateString, type TodayDayData } from '../memory/day-summary';
-import { summarizeOfkDay } from '../ofk/day-aggregate';
 import { createCompileScheduler } from '../ofk/compile-scheduler';
+import { summarizeOfkDay } from '../ofk/day-aggregate';
 import {
   compileDay,
   dayDigestStaleGroups,
@@ -15,6 +15,7 @@ import {
 } from '../ofk/day-digest';
 import { listDayConceptFiles, readConcept } from '../ofk/ofk-bundle';
 import { syncWorkspaceSessions } from '../ofk/session-sync';
+import { readSettings } from '../workspace/settings';
 
 /**
  * 今日页事实查询 IPC(step 5 + P4 step 7 + S6 后台编译):三层架构第三层
@@ -32,7 +33,12 @@ import { syncWorkspaceSessions } from '../ofk/session-sync';
  */
 
 // 编译只从今日页入口与 review-assembler 入口触发;不在热同步/冷同步路径调度。
-const compileScheduler = createCompileScheduler({ compileDay });
+// tags 每次 handler 从 settings 刷新;调度编译用最新一次已知列表(标签列表变化
+// → 编译任务即使用新列表,见 dayDigestStaleGroups tagsSig 判定)。
+let lastTags: string[] = [...DEFAULT_TAGS];
+const compileScheduler = createCompileScheduler({
+  compileDay: (dateISO) => compileDay(dateISO, { tags: lastTags }),
+});
 
 export function registerTodayHandlers(): void {
   ipcMain.handle(
@@ -41,13 +47,18 @@ export function registerTodayHandlers(): void {
       try {
         const dateISO = args?.dateISO ?? localDateString(new Date());
 
+        // 标签列表真源:settings.tags ?? 内置默认(每次 handler 刷新 → 编译用最新)
+        const settings = await readSettings();
+        const tags = settings.tags ?? [...DEFAULT_TAGS];
+        lastTags = tags;
+
         // 冷路径:pi 会话 jsonl → 插件/内置数据源 → OFK 概念(fail-open)
         await syncWorkspaceSessions();
 
         // 后台编译调度(plan S6/D5):stale 判定快(纯本地),编译异步防抖;
         // 数据过期 → 立即返回现有数据 + 编译完成后推送请求页面刷新。
         try {
-          const stale = await dayDigestStaleGroups(dateISO);
+          const stale = await dayDigestStaleGroups(dateISO, tags);
           if (stale.isOk() && stale.value.length > 0) {
             compileScheduler.schedule(dateISO, () => {
               if (!event.sender.isDestroyed()) {
@@ -63,7 +74,7 @@ export function registerTodayHandlers(): void {
         const docs: SessionConceptDoc[] = [];
         const listed = await listDayConceptFiles(dateISO);
         if (listed.isErr()) {
-          return { status: 'error', error: listed.error };
+          return { ok: false, error: listed.error };
         }
         for (const rel of listed.value) {
           const content = await readConcept(rel);
@@ -88,9 +99,9 @@ export function registerTodayHandlers(): void {
         } else {
           for (const [ref, specs] of segsResult.value) digestSegments.set(ref, specs);
         }
-        return { status: 'ok', value: summarizeOfkDay(docs, dateISO, digestSegments) };
+        return { ok: true, value: summarizeOfkDay(docs, dateISO, digestSegments) };
       } catch (cause) {
-        return { status: 'error', error: toLorraError(cause, 'today-failed') };
+        return { ok: false, error: toLorraError(cause, 'today-failed') };
       }
     },
   );

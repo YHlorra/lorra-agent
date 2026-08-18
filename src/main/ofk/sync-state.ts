@@ -1,9 +1,9 @@
 import { mkdirSync, readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
-import { lorraConfigDir } from '../pi-sdk-driver/lorra-config-dir';
-import { atomicWrite } from '../pi-sdk-driver/tool-safety/atomic-write';
 import type { Result } from '../../shared/result';
 import { err, ok, toLorraError } from '../../shared/result';
+import { lorraConfigDir } from '../pi-sdk-driver/lorra-config-dir';
+import { atomicWrite } from '../pi-sdk-driver/tool-safety/atomic-write';
 
 /**
  * 同步水位存储(plan S2/D1):~/.lorra/sync-state.json。

@@ -4,7 +4,7 @@
  * 规范真源:
  * - 
  * (每个 it 首行标注对应 Scenario / Requirement)
- * - design.md D7(PX_PER_HOUR=32,块高∝active_ms,归并、空时段留白、KPI 总量)
+ * - design.md D7(PX_PER_HOUR=64,块高∝active_ms 且 ≥ 最小高度,空时段留白、KPI 总量)
  * - ui-design/today-timeline-v2.html(设计定稿:每 2 小时标号共 12 个、
  * 未完成块延伸到当前时刻、颜色为 --ws-N token 名)
  *
@@ -21,7 +21,7 @@
  * data-testid="today-timeline" 24h 时间线轨道
  * data-testid="today-hour" 带标号刻度,data-hour=0,2,...,22(每 2 小时,共 12 个;23:00 无标号)
  * data-testid="today-block" 会话块;几何用 style.top / style.height(px,
- * 相对轨道,PX_PER_HOUR=32,与 now-line 同原点);
+ * 相对轨道,PX_PER_HOUR=64,与 now-line 同原点;
  * data-workspace / data-color(token 名) /
  * data-unfinished="true|false" /
  * data-session-count(归并块含会话数)
@@ -40,13 +40,13 @@
  * data-testid="review-rail-fallback" 复盘栏降级占位(错误边界兜底,PM 需求①隔离)
  * 悬停详情以 role="tooltip" 承载。
  */
-import { act, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { ReactElement } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { useAppStore } from '@/lib/app-store';
-import { TodayPage, assignLanes, PX_PER_HOUR } from '../../src/renderer/today-page';
+import { TodayPage, assignLanes, layoutSection, PX_PER_HOUR } from '../../src/renderer/today-page';
 import type { TimelineSegment } from '../../src/shared/ofk-schema';
 import {
   WORKSPACE_A,
@@ -136,15 +136,15 @@ async function renderDay(data: TodayDayData): Promise<HTMLElement[]> {
 // Requirement: 24 小时纵向时间线
 // =========================================================================
 
-describe('Requirement: 24 小时纵向时间线(design D7: PX_PER_HOUR=32)', () => {
+describe('Requirement: 24 小时纵向时间线(design D7: PX_PER_HOUR=64)', () => {
   it('Scenario 块位置与时长对应:14:00 开始 30 分钟 → 块位于 14:00 刻度、高度按 30 分钟比例', async () => {
     await renderDay(makeDayData()); // 09:00 wsA 30min;14:00 wsB 60min
     const [morning, afternoon] = blocksByTop();
-    // 位置:14:00 − 09:00 = 5h → 顶部差 5×32=160px
-    expect(parseFloat(afternoon.style.top) - parseFloat(morning.style.top)).toBe(160);
-    // 高度:30min→16px,60min→32px(∝ active_ms)
-    expect(parseFloat(morning.style.height)).toBe(16);
-    expect(parseFloat(afternoon.style.height)).toBe(32);
+    // 位置:14:00 − 09:00 = 5h → 顶部差 5×64=320px
+    expect(parseFloat(afternoon.style.top) - parseFloat(morning.style.top)).toBe(320);
+    // 高度:30min→32px,60min→64px(∝ active_ms)
+    expect(parseFloat(morning.style.height)).toBe(32);
+    expect(parseFloat(afternoon.style.height)).toBe(64);
     // 时间轴刻度(设计定稿 v2):每 2 小时标号,0:00/2:00/.../22:00 共 12 个;23:00 无标号
     expect(screen.getAllByTestId('today-hour')).toHaveLength(12);
     expect(hourLabel(0)).not.toBeNull();
@@ -156,14 +156,14 @@ describe('Requirement: 24 小时纵向时间线(design D7: PX_PER_HOUR=32)', () 
   it('Requirement 含最小高度保证:极短会话块高度不低于最小高度,不塌成 0', async () => {
     const data = makeDayData({
       facts: [
-        fact({ hour: 9, durMin: 30 }), // 16px
-        fact({ hour: 10, durMin: 0.5 }), // 0.27px → 必须被最小高度钳制
+        fact({ hour: 9, durMin: 30 }), // 32px
+        fact({ hour: 10, durMin: 0.5 }), // 0.53px → 必须被最小高度钳制(24px)
       ],
     });
     await renderDay(data);
     const [big, tiny] = blocksByTop();
-    expect(parseFloat(big.style.height)).toBe(16);
-    expect(parseFloat(tiny.style.height)).toBeGreaterThanOrEqual(2);
+    expect(parseFloat(big.style.height)).toBe(32);
+    expect(parseFloat(tiny.style.height)).toBeGreaterThanOrEqual(24);
     expect(parseFloat(tiny.style.height)).toBeLessThan(parseFloat(big.style.height));
   });
 
@@ -183,7 +183,7 @@ describe('Requirement: 24 小时纵向时间线(design D7: PX_PER_HOUR=32)', () 
     // 全天只有两个会话 → 只有两个块,中间全部留白
     expect(blocks()).toHaveLength(2);
     const [morning, night] = blocksByTop();
-    expect(parseFloat(night.style.top) - parseFloat(morning.style.top)).toBe(11 * 32);
+    expect(parseFloat(night.style.top) - parseFloat(morning.style.top)).toBe(11 * 64);
     // 上午 10 点无会话:刻度仍在,无块(留白是有效信息,不被装饰填充)
     expect(hourLabel(10)).not.toBeNull();
   });
@@ -193,88 +193,140 @@ describe('Requirement: 24 小时纵向时间线(design D7: PX_PER_HOUR=32)', () 
 // Requirement: 大类分组(step 7: categories 分区渲染)
 // =========================================================================
 
-describe('Requirement: 大类分组', () => {
-  it('categories 分组渲染: 按 categories 序输出分区(类名 + 计数),块归入所属分区', async () => {
+describe('Requirement: 标签单轨(2026-08-14 标签分类改造)', () => {
+  it('单条轨道: 单个 section(data-category="all"),计数 = 总段数,块带 data-tag', async () => {
     const data = makeDayData({
       facts: [
-        fact({ hour: 9, durMin: 30, category: 'work' }),
-        fact({ hour: 10, durMin: 30, category: 'work' }),
-        fact({ hour: 14, durMin: 60, category: 'reading' }),
+        fact({ hour: 9, durMin: 30, category: '工作' }),
+        fact({ hour: 10, durMin: 30, category: '工作' }),
+        fact({ hour: 14, durMin: 60, category: '阅读' }),
       ],
       categories: [
-        { category: 'work', label: '编程', count: 2, totalActiveMs: 3_600_000 },
-        { category: 'reading', label: '阅读', count: 1, totalActiveMs: 3_600_000 },
+        { category: '工作', label: '工作', count: 2, totalActiveMs: 3_600_000 },
+        { category: '阅读', label: '阅读', count: 1, totalActiveMs: 3_600_000 },
       ],
     });
     await renderDay(data);
     const sections = Array.from(document.querySelectorAll('[data-testid="today-category"]'));
-    expect(sections.map((s) => s.getAttribute('data-category'))).toEqual(['work', 'reading']);
-    // 分区标题 + 计数
-    expect(sections[0].textContent).toContain('工作');
+    // 单条 24h 轨道(不再按类别分区)
+    expect(sections).toHaveLength(1);
+    expect(sections[0].getAttribute('data-category')).toBe('all');
     expect(
       sections[0].querySelector('[data-testid="today-category-count"]')?.textContent,
-    ).toBe('2');
-    expect(sections[1].textContent).toContain('阅读');
-    // 块归入所属分区(work 区 2 块,reading 区 1 块)
+    ).toBe('3');
+    // 块全在同一 section,data-tag 标注标签
     expect(
       sections[0].querySelectorAll<HTMLElement>('[data-testid="today-block"]'),
-    ).toHaveLength(2);
-    expect(
-      sections[1].querySelectorAll<HTMLElement>('[data-testid="today-block"]'),
-    ).toHaveLength(1);
+    ).toHaveLength(3);
     expect(blocks()).toHaveLength(3);
+    const tags = blocks().map((b) => b.getAttribute('data-tag'));
+    expect(tags.filter((t) => t === '工作')).toHaveLength(2);
+    expect(tags.filter((t) => t === '阅读')).toHaveLength(1);
   });
 
-  it('空分组跳过: categories 列出但无事实的大类不渲染分区', async () => {
-    const data = makeDayData({
-      facts: [fact({ hour: 9, durMin: 30, category: 'work' })],
-      categories: [
-        { category: 'work', label: '编程', count: 1, totalActiveMs: 1_800_000 },
-        { category: 'chat', label: '闲聊', count: 0, totalActiveMs: 0 },
-      ],
-    });
-    await renderDay(data);
-    const sections = Array.from(document.querySelectorAll('[data-testid="today-category"]'));
-    expect(sections).toHaveLength(1);
-    expect(sections[0].getAttribute('data-category')).toBe('work');
-  });
-
-  it('未分类兜底: 无 categories 的旧数据 → 全部事实归「未分类」单分区', async () => {
-    const data = makeDayData({ categories: [] }); // 2 条无 category 的事实
-    await renderDay(data);
-    const sections = Array.from(document.querySelectorAll('[data-testid="today-category"]'));
-    expect(sections).toHaveLength(1);
-    expect(sections[0].getAttribute('data-category')).toBe('uncategorized');
-    expect(sections[0].textContent).toContain('未分类');
-    expect(
-      sections[0].querySelectorAll<HTMLElement>('[data-testid="today-block"]'),
-    ).toHaveLength(2);
-  });
-
-  it('块仍按时间定位: 同分区内块 top∝开始时刻(跨分区互不干扰)', async () => {
+  it('tag 过滤 chip 行:全部 + 当日出现的标签(色点 + 计数);点击 chip → 非选中块 dim', async () => {
+    const user = userEvent.setup();
     const data = makeDayData({
       facts: [
-        fact({ hour: 9, durMin: 30, category: 'work' }),
-        fact({ hour: 14, durMin: 30, category: 'work' }),
-        fact({ hour: 10, durMin: 30, category: 'reading' }),
+        fact({ hour: 9, durMin: 30, category: '工作' }),
+        fact({ hour: 10, durMin: 30, category: '工作' }),
+        fact({ hour: 14, durMin: 60, category: '阅读' }),
       ],
       categories: [
-        { category: 'work', label: '编程', count: 2, totalActiveMs: 3_600_000 },
-        { category: 'reading', label: '阅读', count: 1, totalActiveMs: 1_800_000 },
+        { category: '工作', label: '工作', count: 2, totalActiveMs: 3_600_000 },
+        { category: '阅读', label: '阅读', count: 1, totalActiveMs: 3_600_000 },
       ],
     });
     await renderDay(data);
-    const sections = Array.from(document.querySelectorAll('[data-testid="today-category"]'));
-    const workBlocks = Array.from(
-      sections[0].querySelectorAll<HTMLElement>('[data-testid="today-block"]'),
-    );
-    // work 区:09:00 → 14:00 顶部差 5×32=160px
-    expect(parseFloat(workBlocks[1].style.top) - parseFloat(workBlocks[0].style.top)).toBe(160);
-    // reading 区:10:00 块(相对其分区轨道定位)
-    const readingBlock = sections[1].querySelector<HTMLElement>(
-      '[data-testid="today-block"]',
-    );
-    expect(parseFloat(readingBlock!.style.top)).toBe(10 * 32);
+    const filter = document.querySelector('[data-testid="today-tag-filter"]');
+    expect(filter).not.toBeNull();
+    const chips = Array.from(filter!.querySelectorAll('.tag-chip'));
+    // 全部 + 工作 + 阅读(共 3 个 chip)
+    expect(chips.map((c) => c.getAttribute('data-tag'))).toEqual(['all', '工作', '阅读']);
+    // 初始:全部选中,无 dim
+    expect(chips[0].getAttribute('aria-pressed')).toBe('true');
+    for (const b of blocks()) expect(b.classList.contains('dim')).toBe(false);
+
+    // 点「工作」→ 阅读块 dim,工作块不 dim;chips[1] pressed
+    await user.click(chips[1]);
+    const workBlocks = blocks().filter((b) => b.getAttribute('data-tag') === '工作');
+    const readingBlocks = blocks().filter((b) => b.getAttribute('data-tag') === '阅读');
+    expect(workBlocks.every((b) => !b.classList.contains('dim'))).toBe(true);
+    expect(readingBlocks.every((b) => b.classList.contains('dim'))).toBe(true);
+    expect(chips[1].getAttribute('aria-pressed')).toBe('true');
+
+    // 点「全部」→ dim 全移除
+    await user.click(chips[0]);
+    for (const b of blocks()) expect(b.classList.contains('dim')).toBe(false);
+  });
+
+  it('标签图例与块颜色一致:legend item 的 data-tag/data-color 与块同源(token 名)', async () => {
+    await renderDay(makeDayData()); // 2 段,缺省 category '未分类'
+    const items = Array.from(document.querySelectorAll('[data-testid="today-legend-item"]'));
+    expect(items).toHaveLength(1);
+    const item = items[0];
+    expect(item.getAttribute('data-tag')).toBe('未分类');
+    // 图例色 = 块色(tagColor 同源 token 名,非 hex)
+    for (const b of blocks()) {
+      expect(item.getAttribute('data-color')).toBe(b.getAttribute('data-color'));
+    }
+    expect(item.getAttribute('data-color')).toMatch(/^ws-\d$/);
+  });
+
+  it('图例点击过滤:点标签 chip → 非选中标签块 dim;再点取消', async () => {
+    const user = userEvent.setup();
+    const data = makeDayData({
+      facts: [
+        fact({ hour: 9, durMin: 30, category: '工作' }),
+        fact({ hour: 14, durMin: 60, category: '阅读' }),
+      ],
+      categories: [
+        { category: '工作', label: '工作', count: 1, totalActiveMs: 1_800_000 },
+        { category: '阅读', label: '阅读', count: 1, totalActiveMs: 3_600_000 },
+      ],
+    });
+    await renderDay(data);
+    const items = Array.from(document.querySelectorAll('[data-testid="today-legend-item"]'));
+    expect(items).toHaveLength(2);
+    const workItem = items.find((i) => i.getAttribute('data-tag') === '工作');
+    expect(workItem).toBeDefined();
+
+    await user.click(workItem!);
+    expect(workItem).toHaveAttribute('aria-pressed', 'true');
+    expect(
+      blocks()
+        .find((b) => b.getAttribute('data-tag') === '工作')!
+        .classList.contains('dim'),
+    ).toBe(false);
+    expect(
+      blocks()
+        .find((b) => b.getAttribute('data-tag') === '阅读')!
+        .classList.contains('dim'),
+    ).toBe(true);
+
+    await user.click(workItem!);
+    expect(workItem).toHaveAttribute('aria-pressed', 'false');
+    for (const b of blocks()) expect(b.classList.contains('dim')).toBe(false);
+  });
+
+  it('块仍按时间定位: 单轨内块 top∝开始时刻(不再分区,全部同轨道)', async () => {
+    const data = makeDayData({
+      facts: [
+        fact({ hour: 9, durMin: 30, category: '工作' }),
+        fact({ hour: 14, durMin: 30, category: '工作' }),
+        fact({ hour: 10, durMin: 30, category: '阅读' }),
+      ],
+      categories: [
+        { category: '工作', label: '工作', count: 2, totalActiveMs: 3_600_000 },
+        { category: '阅读', label: '阅读', count: 1, totalActiveMs: 1_800_000 },
+      ],
+    });
+    await renderDay(data);
+    const bs = blocksByTop();
+    expect(bs).toHaveLength(3);
+    // 09:00 → 10:00 → 14:00 顶部差 1×64 与 4×64
+    expect(parseFloat(bs[1].style.top) - parseFloat(bs[0].style.top)).toBe(64);
+    expect(parseFloat(bs[2].style.top) - parseFloat(bs[1].style.top)).toBe(4 * 64);
   });
 });
 
@@ -300,37 +352,50 @@ describe('Requirement: 语义分段与甘特堆叠', () => {
     }
     // 无归并标注元素
     expect(document.querySelectorAll('[data-testid="today-merge-count"]')).toHaveLength(0);
-    // 相邻同工作区 3 块仍按时间各自定位(顶部差 = 12 分钟 × 32/60 px)
+    // 相邻同工作区 3 块各自成块;短块最小高度撑出时段时下推,
+    // 同 lane(left 相同)块对垂直互不覆盖(级联下跨 lane 覆盖交给层叠 z 分层)
     const wsA = blocks()
       .filter((b) => b.getAttribute('data-workspace') === WORKSPACE_A)
       .sort((a, b) => parseFloat(a.style.top) - parseFloat(b.style.top));
     expect(wsA).toHaveLength(3);
-    expect(parseFloat(wsA[1].style.top) - parseFloat(wsA[0].style.top)).toBeCloseTo(
-      (12 * PX_PER_HOUR) / 60,
-    );
+    for (let i = 0; i < wsA.length; i++) {
+      for (let j = i + 1; j < wsA.length; j++) {
+        // 同 lane(级联下 left = lane × span,left 相同即同 lane)→ 垂直不覆盖
+        if (parseFloat(wsA[i].style.left) === parseFloat(wsA[j].style.left)) {
+          const hi = wsA[i];
+          const lo = wsA[j];
+          expect(parseFloat(lo.style.top)).toBeGreaterThanOrEqual(
+            parseFloat(hi.style.top) + parseFloat(hi.style.height) + 2,
+          );
+        }
+      }
+    }
   });
 
-  it('重叠两段分列:同分类时间重叠 → left 不同、宽度 ≈ 列宽(48%)', async () => {
+  it('重叠两段甘特分列:同分类时间重叠 → left 0%/50%、宽 48%(列不相交)', async () => {
     const a = fact({ hour: 9, durMin: 60 }); // 09:00–10:00
     const b = fact({ hour: 9, minute: 30, durMin: 30 }); // 09:30–10:00 重叠
     const data = makeDayData({
       facts: [a, b],
       segments: [seg(a), seg(b)],
       categories: [
-        { category: 'uncategorized', label: '未分类', count: 2, totalActiveMs: 5_400_000 },
+        { category: '未分类', label: '未分类', count: 2, totalActiveMs: 5_400_000 },
       ],
     });
     await renderDay(data);
     expect(blocks()).toHaveLength(2);
     const [first, second] = blocksByTop();
-    // 两段分列:left 0% 与 50%(2 列),宽度 100/2-2 = 48%
+    // 甘特分列:2 列 → left 0%/50%,宽 = 50 − 2 缝 = 48%(列不相交,不互相遮挡)
     expect(first.style.left).toBe('0%');
     expect(second.style.left).toBe('50%');
     expect(parseFloat(first.style.width)).toBe(48);
     expect(parseFloat(second.style.width)).toBe(48);
-    // 高度按段 activeMs(60min → 32px / 30min → 16px)
-    expect(parseFloat(first.style.height)).toBe(32);
-    expect(parseFloat(second.style.height)).toBe(16);
+    // 层叠序:z = lane+1(后块盖前块)
+    expect(first.style.getPropertyValue('--z')).toBe('1');
+    expect(second.style.getPropertyValue('--z')).toBe('2');
+    // 高度按段 activeMs(60min → 64px / 30min → 32px)
+    expect(parseFloat(first.style.height)).toBe(64);
+    expect(parseFloat(second.style.height)).toBe(32);
   });
 
   it('LLM 语义段:块内显示段 summary(有 summary 优先于概念 title)', async () => {
@@ -345,31 +410,34 @@ describe('Requirement: 语义分段与甘特堆叠', () => {
     expect(b.textContent).not.toContain('概念标题');
   });
 
-  it('breaks 切段:段 category 继承概念,归入对应泳道', async () => {
-    const base = fact({ hour: 9, durMin: 60, category: 'reading' }); // 09:00–10:00
+  it('breaks 切段:段 category 继承概念,单轨不分区', async () => {
+    const base = fact({ hour: 9, durMin: 60, category: '阅读' }); // 09:00–10:00
     const data = makeDayData({
       facts: [base],
       segments: [seg(base, { start: at(9), end: at(9, 30) }), seg(base, { start: at(9, 30), end: at(10) })],
-      categories: [{ category: 'reading', label: '阅读', count: 2, totalActiveMs: 3_600_000 }],
+      categories: [{ category: '阅读', label: '阅读', count: 2, totalActiveMs: 3_600_000 }],
     });
     await renderDay(data);
     const sections = Array.from(document.querySelectorAll('[data-testid="today-category"]'));
-    expect(sections.map((s) => s.getAttribute('data-category'))).toEqual(['reading']);
+    // 单条轨道(2026-08-14 起不再按类别分区)
+    expect(sections).toHaveLength(1);
+    expect(sections[0].getAttribute('data-category')).toBe('all');
     expect(sections[0].querySelectorAll<HTMLElement>('[data-testid="today-block"]')).toHaveLength(2);
-    // 两块时间连续(09:00 与 09:30),同泳道不合并
+    // 两块时间连续(09:00 与 09:30),同 tag 不合并
     expect(blocks()).toHaveLength(2);
+    for (const b of blocks()) expect(b.getAttribute('data-tag')).toBe('阅读');
   });
 
-  it('分类统计按段计数:同概念两段 → 分区头 count 显示 2(与聚合层 categories 同源)', async () => {
-    const base = fact({ hour: 9, durMin: 60, category: 'programming' });
+  it('计数按段:同概念两段 → section 头 count 显示 2(与聚合层 categories 同源)', async () => {
+    const base = fact({ hour: 9, durMin: 60, category: '编程' });
     const data = makeDayData({
       facts: [base],
       segments: [seg(base, { start: at(9), end: at(9, 30) }), seg(base, { start: at(9, 30), end: at(10) })],
-      categories: [{ category: 'programming', label: '编程', count: 2, totalActiveMs: 3_600_000 }],
+      categories: [{ category: '编程', label: '编程', count: 2, totalActiveMs: 3_600_000 }],
     });
     await renderDay(data);
     const sec = document.querySelector(
-      '[data-testid="today-category"][data-category="programming"]',
+      '[data-testid="today-category"][data-category="all"]',
     );
     expect(sec?.querySelector('[data-testid="today-category-count"]')?.textContent).toBe('2');
   });
@@ -379,6 +447,7 @@ describe('Requirement: 语义分段与甘特堆叠', () => {
       sessionRef,
       workspace: WORKSPACE_A,
       category: 'work',
+      collector: 'pi-sdk',
       start: at(0, 0) + startMin * 60_000,
       end: at(0, 0) + endMin * 60_000,
       activeMs: (endMin - startMin) * 60_000,
@@ -397,6 +466,109 @@ describe('Requirement: 语义分段与甘特堆叠', () => {
     // 空数组 → []
     expect(assignLanes([])).toEqual([]);
   });
+
+  it('layoutSection 单测:相邻不重叠短块同列下推留缝;重叠对分列且各守时间位', () => {
+    const tseg = (startMin: number, endMin: number): TimelineSegment => ({
+      sessionRef: 's',
+      workspace: WORKSPACE_A,
+      category: 'work',
+      collector: 'pi-sdk',
+      start: at(0, 0) + startMin * 60_000,
+      end: at(0, 0) + endMin * 60_000,
+      activeMs: (endMin - startMin) * 60_000,
+      title: 't',
+      unfinished: false,
+      containsTodo: false,
+      model: 'm',
+      tools: [],
+    });
+    // 相邻短块:10min 时长高 10.7px < 最小高 24 → 第二块下推到前块底 + 2 缝
+    const geo = layoutSection([tseg(0, 10), tseg(20, 30)], {
+      pxPerHour: 64,
+      minH: 24,
+      gap: 2,
+      nowTop: null,
+    });
+    expect(geo[0]).toMatchObject({ lane: 0, laneCount: 1, top: 0, height: 24 });
+    expect(geo[1]).toMatchObject({ lane: 0, laneCount: 1, top: 26, height: 24 });
+    // 重叠对:分两列、各守时间位(不被下推)
+    const g2 = layoutSection([tseg(0, 60), tseg(30, 60)], {
+      pxPerHour: 64,
+      minH: 24,
+      gap: 2,
+      nowTop: null,
+    });
+    expect(g2[0]).toMatchObject({ lane: 0, laneCount: 2, top: 0, height: 64 });
+    expect(g2[1]).toMatchObject({ lane: 1, laneCount: 2, top: 32, height: 32 });
+    // 甘特列(2026-08-14 不重叠改造):跨 lane 垂直重叠不互推(列不相交,不遮挡);
+    // 同 lane 前块底越界才下推留缝
+    const g3 = layoutSection([tseg(0, 60), tseg(30, 90)], {
+      pxPerHour: 64,
+      minH: 24,
+      gap: 2,
+      nowTop: null,
+    });
+    expect(g3[0]).toMatchObject({ lane: 0, laneCount: 2, top: 0, height: 64 });
+    expect(g3[1]).toMatchObject({ lane: 1, laneCount: 2, top: 32, height: 64 }); // 不被下推
+    // 同 lane 两段(不重叠):后块时间位在前块最小高度底之下 → 下推留缝
+    const g4 = layoutSection([tseg(0, 10), tseg(20, 30)], {
+      pxPerHour: 64,
+      minH: 24,
+      gap: 2,
+      nowTop: null,
+    });
+    expect(g4[0]).toMatchObject({ lane: 0, laneCount: 1, top: 0, height: 24 });
+    expect(g4[1]).toMatchObject({ lane: 0, laneCount: 1, top: 26, height: 24 });
+  });
+
+  it('局部簇列宽 + 下推不覆盖:孤立会话独占整行;相邻短块垂直互不覆盖', async () => {
+    const data = makeDayData({
+      facts: [
+        fact({ hour: 10, durMin: 21 }), // 孤立 → 整行宽
+        fact({ hour: 11, durMin: 58 }),
+        fact({ hour: 12, durMin: 5 }), // 短块:最小高度撑出时段
+        fact({ hour: 12, minute: 20, durMin: 8 }), // 相邻短块(top0 < 前块底+缝)→ 下推不覆盖
+      ],
+    });
+    await renderDay(data);
+    const bs = blocksByTop();
+    expect(bs).toHaveLength(4);
+    // 孤立块宽度 = 整行 − 2% 列缝 = 98%
+    expect(parseFloat(bs[0].style.width)).toBe(98);
+    expect(parseFloat(bs[1].style.width)).toBe(98);
+    // 相邻短块同列:后块 top ≥ 前块底 + 2px 缝(不覆盖)
+    const prevBottom = parseFloat(bs[2].style.top) + parseFloat(bs[2].style.height);
+    expect(parseFloat(bs[3].style.top)).toBeGreaterThanOrEqual(prevBottom + 2);
+  });
+
+  it('甘特分列:三段互叠 → left 0%/33.3%/66.7%、宽 ≈ 31.3%、列不相交', async () => {
+    const a = fact({ hour: 9, durMin: 90 }); // 09:00–10:30
+    const b = fact({ hour: 9, minute: 30, durMin: 90 }); // 09:30–11:00
+    const c = fact({ hour: 10, durMin: 90 }); // 10:00–11:30(三段两两重叠)
+    const data = makeDayData({
+      facts: [a, b, c],
+      segments: [seg(a), seg(b), seg(c)],
+      categories: [{ category: '未分类', label: '未分类', count: 3, totalActiveMs: 5_400_000 }],
+    });
+    await renderDay(data);
+    expect(blocks()).toHaveLength(3);
+    const sorted = blocksByTop();
+    // 3 列:列宽 100/3 ≈ 33.33 → left 0%/33.33%/66.67%;宽 = 列宽 − 2% 缝
+    const colW = 100 / 3;
+    expect(parseFloat(sorted[0].style.left)).toBeCloseTo(0, 5);
+    expect(parseFloat(sorted[1].style.left)).toBeCloseTo(colW, 5);
+    expect(parseFloat(sorted[2].style.left)).toBeCloseTo(2 * colW, 5);
+    for (const b of sorted) {
+      expect(parseFloat(b.style.width)).toBeCloseTo(colW - 2, 5);
+    }
+    // 列不相交:任两列水平区间不重叠(left+width ≤ 下一列 left)
+    for (let i = 0; i < 2; i++) {
+      const left = parseFloat(sorted[i].style.left);
+      const width = parseFloat(sorted[i].style.width);
+      const nextLeft = parseFloat(sorted[i + 1].style.left);
+      expect(left + width).toBeLessThanOrEqual(nextLeft);
+    }
+  });
 });
 
 // =========================================================================
@@ -404,6 +576,20 @@ describe('Requirement: 语义分段与甘特堆叠', () => {
 // =========================================================================
 
 describe('Requirement: 未完成会话标记', () => {
+
+  it('进行中光球:未完成块含 breathing 光球 canvas,完成块没有', async () => {
+    const data = makeDayData({
+      facts: [
+        fact({ hour: 9, durMin: 30, unfinished: true }),
+        fact({ hour: 10, durMin: 30, unfinished: false }),
+      ],
+    });
+    await renderDay(data);
+    const unfinished = blocks().find((b) => b.getAttribute('data-unfinished') === 'true');
+    const finished = blocks().find((b) => b.getAttribute('data-unfinished') !== 'true');
+    expect(unfinished?.querySelector('.tl-live-orb canvas')).not.toBeNull();
+    expect(finished?.querySelector('.tl-live-orb canvas')).toBeNull();
+  });
   it('Scenario 未完成块可视化:unfinished=true 的块虚线边框 + 「未完成」徽标;完成的块没有', async () => {
     const data = makeDayData({
       facts: [
@@ -433,15 +619,15 @@ describe('Requirement: 未完成会话标记', () => {
     const finished = blocks().find((b) => b.getAttribute('data-unfinished') !== 'true');
     expect(unfinished).toBeDefined();
     expect(finished).toBeDefined();
-    // 延伸:09:00 → 10:30 = 90 分钟 = (90/60)×32 = 48px(而非 activeMs 10min → 5.33px)
-    expect(parseFloat(unfinished!.style.height)).toBe(48);
+    // 延伸:09:00 → 10:30 = 90 分钟 = (90/60)×64 = 96px(而非 activeMs 10min → 10.7px)
+    expect(parseFloat(unfinished!.style.height)).toBe(96);
     // 块底边与当前时刻线重合(延伸语义的几何断言,与 now-line 同原点)
     const nowLine = document.querySelector('[data-testid="today-now-line"]') as HTMLElement;
     expect(parseFloat(unfinished!.style.top) + parseFloat(unfinished!.style.height)).toBe(
       parseFloat(nowLine.style.top),
     );
-    // 普通完成块:高度按 activeMs(30min → 16px),不延伸
-    expect(parseFloat(finished!.style.height)).toBe(16);
+    // 普通完成块:高度按 activeMs(30min → 32px),不延伸
+    expect(parseFloat(finished!.style.height)).toBe(32);
   });
 
   it('设计定稿 v2 退化:未完成块延伸受最小高度约束(极短延伸不塌成 0)', async () => {
@@ -452,7 +638,7 @@ describe('Requirement: 未完成会话标记', () => {
     await renderDay(data);
     const unfinished = blocks().find((b) => b.getAttribute('data-unfinished') === 'true');
     expect(unfinished).toBeDefined();
-    expect(parseFloat(unfinished!.style.height)).toBeGreaterThanOrEqual(2);
+    expect(parseFloat(unfinished!.style.height)).toBeGreaterThanOrEqual(24);
   });
 });
 
@@ -501,7 +687,7 @@ describe('Requirement: KPI 统计卡', () => {
     await renderDay(data);
     expect(kpi('total-active').textContent).toMatch(/(60\s*分钟|1\s*小时)/);
     const blocksSum = blocks().reduce(
-      (sum, b) => sum + (parseFloat(b.style.height) / 32) * 3_600_000,
+      (sum, b) => sum + (parseFloat(b.style.height) / PX_PER_HOUR) * 3_600_000,
       0,
     );
     expect(Math.round(blocksSum)).toBe(3_600_000);
@@ -536,70 +722,25 @@ describe('Requirement: KPI 统计卡', () => {
 });
 
 // =========================================================================
-// Requirement: 工作区图例(颜色 = 设计系统 token 名,非 hex)
+// Requirement: 标签图例(颜色 = tagColor 稳定映射,非 hex)
 // =========================================================================
 
-describe('Requirement: 工作区图例', () => {
-  it('Scenario 图例与块颜色一致:每个当日有活动的工作区一条,颜色(token 名)与块一致、含时长', async () => {
-    await renderDay(makeDayData());
-    const items = Array.from(document.querySelectorAll('[data-testid="today-legend-item"]'));
-    expect(items).toHaveLength(2);
-    // data-color 携带设计系统 token 名(与投影 workspaces[].color 同源),非 hex
-    for (const ws of [WORKSPACE_A, WORKSPACE_B]) {
-      const item = items.find((i) => i.getAttribute('data-workspace') === ws);
-      expect(item).toBeDefined();
-      expect(item?.getAttribute('data-color')).toBe(blockOf(ws).getAttribute('data-color'));
-      expect(item?.textContent).toMatch(/\d/); // 时长数字
-    }
-    expect(
-      items.find((i) => i.getAttribute('data-workspace') === WORKSPACE_A)?.getAttribute('data-color'),
-    ).toBe(WS_TOKEN_A);
-    expect(
-      items.find((i) => i.getAttribute('data-workspace') === WORKSPACE_B)?.getAttribute('data-color'),
-    ).toBe(WS_TOKEN_B);
-    expect(blockOf(WORKSPACE_A).getAttribute('data-color')).toBe(WS_TOKEN_A);
-  });
-
-  it('退化:当日无活动的工作区不出现在图例(仅「有活动」的工作区一条)', async () => {
+describe('Requirement: 标签图例', () => {
+  it('退化:categories 为空(无段统计)时不渲染图例;有标签时图例计数 = 段计数', async () => {
+    // 有标签:图例渲染,计数 = 段计数(2)
     const data = makeDayData({
-      workspaces: [
-        { name: WORKSPACE_A, color: WS_TOKEN_A, totalActiveMs: 1_800_000 },
-        { name: 'E:/work/retired', color: WS_TOKEN_IDLE, totalActiveMs: 0 },
-      ],
+      categories: [{ category: '工作', label: '工作', count: 2, totalActiveMs: 5_400_000 }],
     });
     await renderDay(data);
     const items = Array.from(document.querySelectorAll('[data-testid="today-legend-item"]'));
     expect(items).toHaveLength(1);
-    expect(items[0].getAttribute('data-workspace')).toBe(WORKSPACE_A);
-  });
+    expect(items[0].getAttribute('data-tag')).toBe('工作');
+    expect(items[0].textContent).toMatch(/\d/);
 
-  it('交互:点击图例过滤工作区 → 非选中工作区的块带 dim,选中不带;再点取消 → dim 全部移除', async () => {
-    // 复审 #N3 回归守卫:dim 曾被子入场动画 forwards 填充压过(#N1),这里钉「过滤时
-    // 非选中块必须带 dim 类、取消后必须移除」的可观测契约;可见性由 CSS
-    // .tl-block.dim { animation:none; opacity:... } 保证(视觉走 )。
-    const user = userEvent.setup();
-    await renderDay(makeDayData()); // wsA 09:00 + wsB 14:00
-    const items = Array.from(document.querySelectorAll('[data-testid="today-legend-item"]'));
-    const wsAItem = items.find((i) => i.getAttribute('data-workspace') === WORKSPACE_A);
-    const wsBItem = items.find((i) => i.getAttribute('data-workspace') === WORKSPACE_B);
-    expect(wsAItem).toBeDefined();
-    expect(wsBItem).toBeDefined();
-
-    // 初始:两块均无 dim
-    expect(blockOf(WORKSPACE_A).classList.contains('dim')).toBe(false);
-    expect(blockOf(WORKSPACE_B).classList.contains('dim')).toBe(false);
-
-    // 点击选中 wsA → wsB 块带 dim,wsA 块不带;图例项 aria-pressed 反馈
-    await user.click(wsAItem!);
-    expect(blockOf(WORKSPACE_A).classList.contains('dim')).toBe(false);
-    expect(blockOf(WORKSPACE_B).classList.contains('dim')).toBe(true);
-    expect(wsAItem).toHaveAttribute('aria-pressed', 'true');
-
-    // 再点取消过滤 → dim 全部移除
-    await user.click(wsAItem!);
-    expect(blockOf(WORKSPACE_A).classList.contains('dim')).toBe(false);
-    expect(blockOf(WORKSPACE_B).classList.contains('dim')).toBe(false);
-    expect(wsAItem).toHaveAttribute('aria-pressed', 'false');
+    // 空 categories(无标签统计)→ 图例不渲染
+    cleanup();
+    await renderDay(makeDayData({ categories: [] }));
+    expect(document.querySelectorAll('[data-testid="today-legend-item"]')).toHaveLength(0);
   });
 });
 
@@ -608,32 +749,42 @@ describe('Requirement: 工作区图例', () => {
 // =========================================================================
 
 describe('Requirement: 交互(悬停详情 / 点击下钻)', () => {
-  it('Scenario 悬停显示详情:提示含工作区、起止时刻、时长、模型、Token、工具数', async () => {
+  it('Scenario 悬停显示详情:标题(summary 优先)、起止时刻、标签、智能体、时长——不含模型/Token/工具', async () => {
     const user = userEvent.setup();
+    const base = fact({
+      hour: 9,
+      durMin: 30,
+      workspace: WORKSPACE_A,
+      title: '写脚本',
+      category: '工作',
+      model: 'claude-sonnet-4',
+      tokens: 12345,
+      tools: ['bash', 'write'],
+    });
     const data = makeDayData({
-      facts: [
-        fact({
-          hour: 9,
-          durMin: 30,
-          workspace: WORKSPACE_A,
-          title: '写脚本',
-          model: 'claude-sonnet-4',
-          tokens: 12345,
-          tools: ['bash', 'write'],
-        }),
-      ],
+      facts: [base],
+      segments: [seg(base, { summary: '修复登录测试', collector: 'claude-code' })],
+      categories: [{ category: '工作', label: '工作', count: 1, totalActiveMs: 1_800_000 }],
     });
     await renderDay(data);
     await user.hover(blocks()[0]);
     const tip = await screen.findByRole('tooltip', {}, { timeout: 3000 });
-    expect(tip.textContent).toMatch(/demo/); // 工作区(header.cwd 全路径)
+    // 标题 = LLM summary(优先于概念 title)
+    expect(tip.textContent).toContain('修复登录测试');
+    expect(tip.textContent).not.toContain('写脚本');
     expect(tip.textContent).toMatch(/09:00/); // 起
     expect(tip.textContent).toMatch(/09:30/); // 止
+    expect(tip.textContent).toContain('工作'); // 标签(tag)
+    expect(tip.textContent).toContain('Claude Code'); // 智能体(collector 映射)
     expect(tip.textContent).toMatch(/30\s*(分钟|min)/); // 时长
-    expect(tip.textContent).toContain('claude-sonnet-4'); // 模型
-    expect(tip.textContent).toMatch(/12,?345/); // Token
-    expect(tip.textContent).toContain('bash');
-    expect(tip.textContent).toContain('write'); // 工具
+    // 移除模型/Token/工具三行(2026-08-14)
+    expect(tip.textContent).not.toContain('claude-sonnet-4');
+    expect(tip.textContent).not.toMatch(/12,?345/);
+    expect(tip.textContent).not.toContain('bash');
+    expect(tip.textContent).not.toContain('write');
+    expect(tip.textContent).not.toContain('模型');
+    expect(tip.textContent).not.toContain('Token');
+    expect(tip.textContent).not.toContain('工具');
   });
 
   it('Scenario 点击块跳转:切回该会话所属工作区并打开会话,页面回工作台', async () => {
@@ -903,13 +1054,13 @@ describe('PM 需求②: 日历日期选择', () => {
     await waitFor(() => expect(mock.today.getDayFacts).toHaveBeenCalledWith('2026-08-07'));
     await screen.findAllByTestId('today-block');
 
-    // 非今天:无 now-line;unfinished 高度按 activeMs(30min → 16px),不延伸
+    // 非今天:无 now-line;unfinished 高度按 activeMs(30min → 32px),不延伸
     expect(screen.queryByTestId('today-now-line')).not.toBeInTheDocument();
     const unfinished = blocks().find((b) => b.getAttribute('data-unfinished') === 'true');
     expect(unfinished).toBeDefined();
-    expect(parseFloat(unfinished!.style.height)).toBe(16);
-    // 非今天:普通完成块高度不变(30min → 16px)
+    expect(parseFloat(unfinished!.style.height)).toBe(32);
+    // 非今天:普通完成块高度不变(30min → 32px)
     const finished = blocks().find((b) => b.getAttribute('data-unfinished') !== 'true');
-    expect(parseFloat(finished!.style.height)).toBe(16);
+    expect(parseFloat(finished!.style.height)).toBe(32);
   });
 });

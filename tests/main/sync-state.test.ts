@@ -2,15 +2,15 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync }
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import * as atomicWriteModule from '../../src/main/pi-sdk-driver/tool-safety/atomic-write';
 import {
-  SYNC_STATE_VERSION,
   isFileUnchanged,
   readSyncState,
+  SYNC_STATE_VERSION,
   statFile,
   syncStatePath,
   updateSyncState,
 } from '../../src/main/ofk/sync-state';
+import * as atomicWriteModule from '../../src/main/pi-sdk-driver/tool-safety/atomic-write';
 
 // Requirement(plan S2/D1):同步水位存储——缺失/损坏/版本不符 → 空态;
 // updateSyncState read-modify-write 串行化 + dirty-check;statFile/isFileUnchanged 判定。
@@ -53,7 +53,11 @@ describe('sync-state', () => {
   it('version 不符 → 空态', async () => {
     const p = syncStatePath();
     mkdirSync(path.dirname(p), { recursive: true });
-    writeFileSync(p, JSON.stringify({ version: 999, files: { a: {} }, sources: { opencode: 1 } }), 'utf8');
+    writeFileSync(
+      p,
+      JSON.stringify({ version: 999, files: { a: {} }, sources: { opencode: 1 } }),
+      'utf8',
+    );
     const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
     const state = await readSyncState();
     expect(state).toEqual({ version: SYNC_STATE_VERSION, files: {}, sources: {} });
@@ -67,7 +71,11 @@ describe('sync-state', () => {
       s.sources.opencode = 42;
     });
     const state = await readSyncState();
-    expect(state.files['C:\\work\\demo\\a.jsonl']).toEqual({ mtimeMs: 1, size: 2, conceptRel: 'sessions/x.md' });
+    expect(state.files['C:\\work\\demo\\a.jsonl']).toEqual({
+      mtimeMs: 1,
+      size: 2,
+      conceptRel: 'sessions/x.md',
+    });
     expect(state.sources.opencode).toBe(42);
   });
 
@@ -119,7 +127,9 @@ describe('sync-state', () => {
       s.files['C:\\keep.jsonl'] = { mtimeMs: 1, size: 1, conceptRel: 'sessions/keep.md' };
     });
     const before = readFileSync(syncStatePath(), 'utf8');
-    const spy = vi.spyOn(atomicWriteModule, 'atomicWrite').mockRejectedValueOnce(new Error('disk full'));
+    const spy = vi
+      .spyOn(atomicWriteModule, 'atomicWrite')
+      .mockRejectedValueOnce(new Error('disk full'));
     try {
       const result = await updateSyncState((s) => {
         s.files['C:\\c.jsonl'] = { mtimeMs: 3, size: 30, conceptRel: 'sessions/c.md' };

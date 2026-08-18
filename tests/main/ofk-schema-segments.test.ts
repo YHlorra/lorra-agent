@@ -147,11 +147,11 @@ describe('parseDigestSegments', () => {
     expect(parseDigestSegments(fmWithSegments({ ref: 'x' }))).toEqual([]);
   });
 
-  it('非法条目逐条丢弃: 非法 category / 缺 start / 缺 ref / 时间不可解析', () => {
+  it('非法条目逐条丢弃: 缺 start / 缺 ref / 时间不可解析;category 非空串即合法(自由 tag)', () => {
     const fm = fmWithSegments([
       {
         ref: 'a',
-        category: 'nonsense',
+        category: 'nonsense', // 2026-08-14 起非空串即合法 → 保留
         start: '2026-08-13T10:00:00.000Z',
         end: '2026-08-13T10:30:00.000Z',
       },
@@ -173,6 +173,12 @@ describe('parseDigestSegments', () => {
     ]);
     expect(parseDigestSegments(fm)).toEqual([
       {
+        ref: 'a',
+        category: 'nonsense',
+        start: '2026-08-13T10:00:00.000Z',
+        end: '2026-08-13T10:30:00.000Z',
+      },
+      {
         ref: 'd',
         category: 'chat',
         start: '2026-08-13T11:00:00.000Z',
@@ -181,11 +187,11 @@ describe('parseDigestSegments', () => {
     ]);
   });
 
-  it('全部非法 → []', () => {
+  it('全部非法(空 category / 缺时间)→ []', () => {
     const fm = fmWithSegments([
       {
         ref: 'x',
-        category: 'bad',
+        category: '',
         start: '2026-08-13T10:00:00.000Z',
         end: '2026-08-13T10:30:00.000Z',
       },
@@ -225,6 +231,13 @@ describe('parseDigestSegments', () => {
         start: '2026-08-13T10:00:00.000Z',
         end: '2026-08-13T10:30:00.000Z',
         summary: '读第三章: 时间线',
+      },
+      // 2026-08-14 起 category 非空串即合法(nonsense 保留)
+      {
+        ref: 'sess-b',
+        category: 'nonsense',
+        start: '2026-08-13T11:00:00.000Z',
+        end: '2026-08-13T11:30:00.000Z',
       },
     ]);
   });

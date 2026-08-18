@@ -5,8 +5,8 @@
  * 1. workspace = header.cwd 全路径形态(如 'E:/work/demo'),非占位短名
  * 2. byPeriod 只喂原始活跃毫秒数(≥60_000 的 ms 值);0-1 占比形态已被
  * 审查否决——任何把 byPeriod 当占比乘的渲染都会得到天文数字而变红
- * 3. IPC 信封 = 生产 SerializedResult {status:'ok',value} / {status:'error',error},
- * 与 src/main/ipc/today-ipc.ts 返回值同构;{ok:true} 视图形状是死分支,不喂
+ * 3. IPC 信封 = 生产 SerializedResult {ok:true,value} / {ok:false,error},
+ * 与 src/main/ipc/today-ipc.ts 返回值同构;{status:...} 旧形状是死分支,不喂
  * 4. workspaces[].color = 工作区 token 名('ws-1'..'ws-6'),
  * 浅/深双主题各配一套色值(ui-design/today-timeline-v2.html --ws-N),非 hex
  * 5. facts 形状与 src/shared/facts-schema.ts SessionFact 同源(类型即契约)
@@ -103,7 +103,8 @@ export function seg(f: TodaySessionFact, over?: Partial<TimelineSegment>): Timel
   return {
     sessionRef: f.sessionRef,
     workspace: f.workspace,
-    category: isSessionCategory(f.category) ? f.category : 'uncategorized',
+    category: isSessionCategory(f.category) ? f.category : '未分类',
+    collector: f.collector,
     start: f.start,
     end: f.end,
     activeMs: f.activeMs,
@@ -135,9 +136,9 @@ export function makeDayData(over?: Partial<TodayDayData>): TodayDayData {
       { name: WORKSPACE_A, color: WS_TOKEN_A, totalActiveMs: 1_800_000 },
       { name: WORKSPACE_B, color: WS_TOKEN_B, totalActiveMs: 3_600_000 },
     ],
-    // 生产聚合(P1)对无 category 的概念恒产 uncategorized 分区;缺省即该形态。
+    // 生产聚合(2026-08-14 标签分类)对无 category 的概念恒产「未分类」;缺省即该形态。
     categories: [
-      { category: 'uncategorized', label: '未分类', count: facts.length, totalActiveMs: 5_400_000 },
+      { category: '未分类', label: '未分类', count: facts.length, totalActiveMs: 5_400_000 },
     ],
     // 渲染段:无 LLM 段无 breaks → 每概念单段(与最终 facts 同源派生)
     segments: overSegments ?? facts.map((f) => seg(f)),
@@ -165,15 +166,15 @@ export function emptyDayData(): TodayDayData {
 // IPC 信封:生产 SerializedResult 形状(src/main/ipc/today-ipc.ts 返回值)。
 // ---------------------------------------------------------------------------
 
-export function okToday(data: TodayDayData): { status: 'ok'; value: TodayDayData } {
-  return { status: 'ok', value: data };
+export function okToday(data: TodayDayData): { ok: true; value: TodayDayData } {
+  return { ok: true, value: data };
 }
 
 export function errToday(
   code: string,
   message: string,
-): { status: 'error'; error: { code: string; message: string } } {
-  return { status: 'error', error: { code, message } };
+): { ok: false; error: { code: string; message: string } } {
+  return { ok: false, error: { code, message } };
 }
 
 // ---------------------------------------------------------------------------

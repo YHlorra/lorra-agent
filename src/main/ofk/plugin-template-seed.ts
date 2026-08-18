@@ -8,8 +8,8 @@ import { lorraConfigDir } from '../pi-sdk-driver/lorra-config-dir';
  * 失败静默(同 seedMemoryMaintenanceSkill 纪律)。
  */
 
-export const PLUGINS_DIR_RELATIVE = 'plugins';
-export const PLUGIN_TEMPLATE_NAME = '_template';
+const PLUGINS_DIR_RELATIVE = 'plugins';
+const PLUGIN_TEMPLATE_NAME = '_template';
 
 export function pluginsRoot(): string {
   return path.join(lorraConfigDir(), PLUGINS_DIR_RELATIVE);
@@ -59,7 +59,7 @@ agentId=<插件名> / factId=内容哈希。非法字段的条目会被剔除并
 插件。collect 失败不会影响 lorra 主流程(fail-open)。
 `;
 
-export const PLUGIN_TEMPLATE_PLUGIN_JSON = `{
+const PLUGIN_TEMPLATE_PLUGIN_JSON = `{
   "name": "my-collector",
   "runtime": "my-runtime",
   "description": "我的自定义数据源",
@@ -67,7 +67,7 @@ export const PLUGIN_TEMPLATE_PLUGIN_JSON = `{
 }
 `;
 
-export const PLUGIN_TEMPLATE_INDEX_MJS = `// 数据源插件模板(契约)
+const PLUGIN_TEMPLATE_INDEX_MJS = `// 数据源插件模板(契约)
 // collect 必须返回 PluginFact[](纯 JSON 对象数组):
 //   Omit<SessionFact, 'factId'|'schemaVersion'|'collector'|'runtime'|'agentId'>
 // 必需字段: sessionRef / scope / summaryRef / privacy / workspace /

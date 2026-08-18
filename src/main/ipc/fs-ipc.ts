@@ -10,7 +10,7 @@ import {
   removeAnnotation,
   saveAnnotation,
 } from '../annotations/annotations-store';
-import { searchWorkspaceFiles } from '../fs/fs-search';
+import { resolveWikilinkFile, searchWorkspaceFiles } from '../fs/fs-search';
 import { readFileContent, readTree, resolveId } from '../fs/path-resolve';
 import { tMain } from '../i18n';
 import { atomicWrite } from '../pi-sdk-driver/tool-safety/atomic-write';
@@ -51,6 +51,24 @@ export function registerFsHandlers(opts: { getActiveWorkspacePath: () => string 
       }
       return ResultRuntime.tryPromise({
         try: async () => searchWorkspaceFiles(ws, args.query, args.limit),
+        catch: (cause) => ({
+          code: 'fs-error',
+          message: cause instanceof Error ? cause.message : String(cause),
+        }),
+      }).then(toSerialized);
+    },
+  );
+
+  // 双链导航目标解析(2026-08-17):按文件名精确匹配,命中返回 fileId,未命中 null。
+  ipcMain.handle(
+    'lorra.fs.resolve-wikilink',
+    async (_e, args: { name: string }): Promise<SerializedResult<unknown>> => {
+      const ws = opts.getActiveWorkspacePath();
+      if (!ws) {
+        return toSerialized(err({ code: 'no-workspace', message: 'workspace not set' }));
+      }
+      return ResultRuntime.tryPromise({
+        try: async () => ({ fileId: await resolveWikilinkFile(ws, args.name) }),
         catch: (cause) => ({
           code: 'fs-error',
           message: cause instanceof Error ? cause.message : String(cause),

@@ -3,9 +3,9 @@ import path from 'node:path';
 import fc from 'fast-check';
 import { describe, expect, it, vi } from 'vitest';
 
-// Session-persistence transitively pulls in `trash-delete.ts` which imports
-// `shell` from `electron`. In unit-test env we never load Electron's binary;
-// stub the surface used by the safety interceptor.
+// Session-persistence transitively pulls in the tool-safety interceptor which
+// imports `shell` from `electron`. In unit-test env we never load Electron's
+// binary; stub the surface used by the safety interceptor.
 //
 // `workspace-realpath` cross-workspace + symlink isolation behavior was
 // previously mocked here; those cases now live in
@@ -17,6 +17,11 @@ vi.mock('electron', () => ({
   shell: {
     trashItem: vi.fn().mockResolvedValue(undefined),
   },
+}));
+
+vi.mock('node:fs/promises', async (orig) => ({
+  ...(await orig()),
+  realpath: vi.fn(),
 }));
 
 vi.mock('@earendil-works/pi-coding-agent', () => ({
@@ -34,10 +39,7 @@ vi.mock('@earendil-works/pi-coding-agent', () => ({
   loadExtensionFromFactory: vi.fn().mockResolvedValue({}),
 }));
 
-vi.mock('../../src/main/pi-sdk-driver/workspace-realpath', () => ({
-  readWorkspaceRealpath: vi.fn(),
-}));
-
+import { realpath } from 'node:fs/promises';
 import {
   createAgentSessionFromServices,
   createAgentSessionServices,
@@ -45,12 +47,11 @@ import {
 } from '@earendil-works/pi-coding-agent';
 import type { SessionInfo } from '../../src/main/pi-sdk-driver/driver';
 import { createSessionPersistence } from '../../src/main/pi-sdk-driver/session-persistence';
-import { readWorkspaceRealpath } from '../../src/main/pi-sdk-driver/workspace-realpath';
 
 const mockList = SessionManager.list as ReturnType<typeof vi.fn>;
 const mockCreateServices = createAgentSessionServices as ReturnType<typeof vi.fn>;
 const mockCreateSession = createAgentSessionFromServices as ReturnType<typeof vi.fn>;
-const mockRealpath = readWorkspaceRealpath as ReturnType<typeof vi.fn>;
+const mockRealpath = realpath as unknown as ReturnType<typeof vi.fn>;
 
 function makeSession(id: string, cwd: string, p: string = `/tmp/${id}.jsonl`): SessionInfo {
   return {
@@ -102,6 +103,10 @@ describe('session isolation', () => {
         path.join(os.homedir(), '.agents', 'skills'),
       ],
       skillsOverride: expect.any(Function),
+      // 2026-08-15(系统提示词批,整体替换):lorra 完整主提示词经 systemPromptOverride;
+      // appendSystemPromptOverride 清空,掐掉 SDK 自动发现的 APPEND_SYSTEM.md。
+      systemPromptOverride: expect.any(Function),
+      appendSystemPromptOverride: expect.any(Function),
     };
     expect(mockCreateServices).toHaveBeenNthCalledWith(1, {
       cwd: '/workspace/real',

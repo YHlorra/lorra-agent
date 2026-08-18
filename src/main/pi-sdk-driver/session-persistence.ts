@@ -1,4 +1,5 @@
 import { statSync } from 'node:fs';
+import { realpath } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import type {
@@ -21,6 +22,11 @@ import {
 // 纯共享模块(零 node 依赖):本文件被 tests/unit 直接 import,
 // 经 recall.ts 会拖入 shared-memory-store → node:sqlite,client 测试图打包失败。
 import { stripRecallContext } from '../../shared/recall-context';
+import { collectAgentPluginSkillPaths, loadAgentPlugins } from '../agent-plugins/loader';
+import { agentPluginsRoot } from '../agent-plugins/root';
+import { createMcpClient, type McpClient } from '../mcp/mcp-client';
+import { createMcpExtension, type ReadyMcpTool } from '../mcp/mcp-extension';
+import { mcpToolName } from '../mcp/tool-adapter';
 import {
   createMemoryTool,
   MEMORY_TOOL_NAME,
@@ -32,10 +38,10 @@ import { getSkillCollectionRoot } from '../skills/skills-store';
 import { readSettings } from '../workspace/settings';
 import type { BlockEmitter, SessionInfo, SessionPersistence } from './driver';
 import { lorraConfigDir } from './lorra-config-dir';
+import { buildLorraSystemPrompt } from './lorra-system-prompt';
 import { createInstallSkillTool, SKILL_INSTALL_TOOL_NAME } from './skill-tools/install-skill-tool';
 import { createSafetyInterceptor } from './tool-safety/interceptor';
 import { AnySearchClient, createWebTools, ExaMcpClient, type McpFetchLike } from './web-tools';
-import { readWorkspaceRealpath } from './workspace-realpath';
 
 /**
  * SDK discovery default for SessionManager.list(cwd) without an explicit
@@ -102,6 +108,17 @@ function loadInlineExtension(
       list.push(handler as never);
       extension.handlers.set(event, list);
     },
+    registerTool(tool: Parameters<ExtensionAPI['registerTool']>[0]) {
+      extension.tools.set(tool.name, {
+        definition: tool,
+        sourceInfo: {
+          path: extensionPath,
+          source: 'inline',
+          scope: 'project',
+          origin: 'top-level',
+        },
+      });
+    },
   } as unknown as ExtensionAPI;
   void factory(api);
   return extension;
@@ -142,7 +159,7 @@ export async function createSessionPersistence(opts: {
  */
   emitMemoryRecorded?: (payload: MemoryRecordedPayload) => void;
 }): Promise<SessionPersistence> {
-  const wsRealpath = await readWorkspaceRealpath(opts.workspacePath);
+  const wsRealpath = await realpath(opts.workspacePath);
   // One MCP client per workspace activation: all sessions share the cached
   // Exa session so only the first tool call pays the initialize round-trip.
   const webClient = new ExaMcpClient({ fetcher: opts.fetcher });
@@ -181,10 +198,21 @@ export async function createSessionPersistence(opts: {
     const collectionRootDuplicates = baseSkillPaths.some(
       (p) => path.resolve(p).toLowerCase() === collectionRootReal.toLowerCase(),
     );
-    const additionalSkillPaths =
-      collectionRootDuplicates || !collectionRootExists
+    // 第 6 源：启用的 agent-plugins 技能根（skills/ 目录，SDK 递归发现其下 SKILL.md）。
+    const pluginRoot =
+      settings.agentPluginRoot && settings.agentPluginRoot.trim() !== ''
+        ? settings.agentPluginRoot
+        : agentPluginsRoot();
+    const agentPluginSkills = await collectAgentPluginSkillPaths({
+      root: pluginRoot,
+      disabled: new Set(settings.disabledPlugins ?? []),
+    });
+    const additionalSkillPaths = [
+      ...(collectionRootDuplicates || !collectionRootExists
         ? baseSkillPaths
-        : [...baseSkillPaths, collectionRootReal];
+        : [...baseSkillPaths, collectionRootReal]),
+      ...agentPluginSkills.map((s) => s.skillsRoot),
+    ];
     const services = await createAgentSessionServices({
       cwd: wsRealpath,
       agentDir: lorraConfigDir(),
@@ -197,8 +225,15 @@ export async function createSessionPersistence(opts: {
       // 2026-08-12(/D6 勘误 4):skillsOverride 剔除 = 共享合并函数
       // 输出(既有 .pi/复盘剔除原样保持 + disabledSkills + 按工作区停用)。
       // 2026-08-13(技能收集批 D8):additionalSkillPaths 动态加入自定义收集根。
+      // 2026-08-15(系统提示词批,整体替换):lorra 完整主提示词经 systemPromptOverride
+      // 替换 SDK 默认主文(expert coding assistant operating inside pi 段不再进入),
+      // 身份/汇报格式/配置路径/专属工具/pi 文档指引全在 lorra-system-prompt.ts 一份
+      // 文案。appendSystemPromptOverride 清空,掐掉 SDK 自动发现的 APPEND_SYSTEM.md,
+      // 确保替换干净。cwd/工具清单//skills 仍由 buildSystemPrompt 动态注入。
       resourceLoaderOptions: {
         additionalSkillPaths,
+        systemPromptOverride: () => buildLorraSystemPrompt({ workspacePath: wsRealpath }),
+        appendSystemPromptOverride: () => [],
         skillsOverride: (base) => {
           return {
             ...base,
@@ -264,6 +299,68 @@ export async function createSessionPersistence(opts: {
         getProducer: () => 'pi-sdk',
       }),
     ];
+
+    // ── 自研 MCP 运行时（plan S3，扩展 pi 边界）：拉起启用的 MCP server → tools/list →
+    // 收集 ReadyMcpTool，纳入 tools 白名单并经 McpExtension 注册进会话工具面。──
+    const pluginDataRoot = path.join(lorraConfigDir(), 'plugins', 'agent-plugins', 'data');
+    const mcpClients: Array<{ serverId: string; client: McpClient }> = [];
+    const readyMcpTools: ReadyMcpTool[] = [];
+    try {
+      // 1) 插件内置 MCP（loadAgentPlugins 汇总，仅 enabled 插件 + 非 sse）。
+      const pluginLoad = await loadAgentPlugins({
+        root: agentPluginsRoot(),
+        disabled: new Set(settings.disabledPlugins ?? []),
+      });
+      if (pluginLoad.isOk()) {
+        for (const mcp of pluginLoad.value.mcps) {
+          if (!mcp.enabled || mcp.config.type === 'sse') continue;
+          const created = createMcpClient(mcp.config, agentPluginsRoot(), {
+            fetcher: opts.fetcher,
+            pluginDataDir: path.join(pluginDataRoot, 'plugin-' + mcp.pluginName),
+          });
+          if (created.isErr()) continue;
+          const started = await created.value.start();
+          if (started.isErr()) {
+            created.value.stop();
+            continue;
+          }
+          mcpClients.push({ serverId: mcp.id, client: created.value });
+          for (const tool of started.value) readyMcpTools.push({ serverId: mcp.id, tool });
+        }
+      }
+      // 2) 用户自配 MCP（settings.mcpServers，enabled !== false）。
+      for (const [id, cfg] of Object.entries(settings.mcpServers ?? {})) {
+        if (cfg.enabled === false || cfg.type === 'sse') continue;
+        const created = createMcpClient(cfg, wsRealpath, {
+          fetcher: opts.fetcher,
+          pluginDataDir: path.join(pluginDataRoot, 'user-' + id),
+        });
+        if (created.isErr()) continue;
+        const started = await created.value.start();
+        if (started.isErr()) {
+          created.value.stop();
+          continue;
+        }
+        mcpClients.push({ serverId: id, client: created.value });
+        for (const tool of started.value) readyMcpTools.push({ serverId: id, tool });
+      }
+    } catch {
+      // MCP 拉取失败不改挂会话（fail-open；单 server 失败已在 start 层跳过）。
+    }
+
+    const mcpToolNames = readyMcpTools.map((r) => mcpToolName(r.serverId, r.tool.name));
+    const mcpCall = async (
+      serverId: string,
+      toolName: string,
+      args: Record<string, unknown>,
+    ): Promise<{ ok: boolean; text?: string; error?: string }> => {
+      const entry = mcpClients.find((c) => c.serverId === serverId);
+      if (!entry) return { ok: false, error: 'MCP 服务器不可用' };
+      const res = await entry.client.callTool(toolName, args);
+      if (res.isErr()) return { ok: false, error: res.error.message };
+      return { ok: true, text: res.value };
+    };
+
     const { session } = await createAgentSessionFromServices({
       services,
       sessionManager,
@@ -284,6 +381,7 @@ export async function createSessionPersistence(opts: {
         MEMORY_TOOL_NAME,
         SKILL_INSTALL_TOOL_NAME,
         KNOWLEDGE_TOOL_NAME,
+        ...mcpToolNames,
       ],
       customTools,
     });
@@ -293,6 +391,16 @@ export async function createSessionPersistence(opts: {
     // extensions is private on ExtensionRunner; cast through unknown to access.
     const runner = session.extensionRunner as unknown as { extensions: unknown[] };
     runner.extensions.push(safetyExtension);
+    // MCP 工具（经 registerTool 注册）扩展到会话工具面（plan S3）。无 MCP 工具则跳过。
+    if (readyMcpTools.length > 0) {
+      const mcpExtension = loadInlineExtension(
+        createMcpExtension({ tools: readyMcpTools, call: mcpCall }),
+        eventBus,
+        runtime,
+        'mcp-bridge',
+      );
+      runner.extensions.push(mcpExtension);
+    }
     return session;
   }
 
@@ -304,11 +412,11 @@ export async function createSessionPersistence(opts: {
       } catch {
         return [];
       }
-      const wsReal = await readWorkspaceRealpath(cwd);
+      const wsReal = await realpath(cwd);
       const filtered: SessionInfo[] = [];
       for (const s of all) {
         try {
-          const sessionCwdReal = await readWorkspaceRealpath(s.cwd);
+          const sessionCwdReal = await realpath(s.cwd);
           if (sessionCwdReal === wsReal && s.messageCount > 0) {
             filtered.push(toSessionInfo(s));
           }

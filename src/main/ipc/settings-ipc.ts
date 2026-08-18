@@ -1,5 +1,6 @@
 import { ipcMain } from 'electron';
 import type { Lang } from '../../shared/i18n-core';
+import { DEFAULT_TAGS } from '../../shared/ofk-schema';
 import type { SerializedResult } from '../../shared/result';
 import { err, ok, toSerialized } from '../../shared/result';
 import { setMainLanguage } from '../i18n';
@@ -24,6 +25,8 @@ export interface SettingsGetDto {
   defaultHideThinking: boolean;
   compileModel: CompileModelDto | null;
   dataSources: DataSourcesDto;
+  /** 今日页标签列表(缺省 = 内置 DEFAULT_TAGS)。 */
+  tags: string[];
 }
 
 export interface SettingsSetArgs {
@@ -32,6 +35,7 @@ export interface SettingsSetArgs {
   defaultHideThinking?: boolean;
   compileModel?: CompileModelDto | null;
   dataSources?: Partial<DataSourcesDto>;
+  tags?: string[];
 }
 
 /** dataSources 逐键 === true 才保留(白名单)。 */
@@ -42,6 +46,12 @@ function normalizeDataSources(value: Partial<DataSourcesDto>): DataSourcesDto {
     ohMyPi: value.ohMyPi === true,
     workbuddy: value.workbuddy === true,
   };
+}
+
+/** tags 规范化:非空串、trim、去重、≤30;空数组 → undefined(回内置默认)。 */
+function normalizeTags(value: string[]): string[] | undefined {
+  const tags = [...new Set(value.map((t) => t.trim()).filter((t) => t !== ''))].slice(0, 30);
+  return tags.length > 0 ? tags : undefined;
 }
 
 /**
@@ -61,6 +71,7 @@ export function registerSettingsHandlers(): void {
           defaultHideThinking: settings.defaultHideThinking ?? false,
           compileModel: settings.compileModel ?? null,
           dataSources: normalizeDataSources(settings.dataSources ?? {}),
+          tags: settings.tags ?? [...DEFAULT_TAGS],
         }),
       );
     } catch (cause) {
@@ -92,6 +103,7 @@ export function registerSettingsHandlers(): void {
           ...(args.dataSources !== undefined
             ? { dataSources: { ...(current.dataSources ?? {}), ...args.dataSources } }
             : {}),
+          ...(args.tags !== undefined ? { tags: normalizeTags(args.tags) } : {}),
         });
         return toSerialized(ok(undefined));
       } catch (cause) {

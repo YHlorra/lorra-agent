@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useState } from 'react';
-import type { LorraResult } from '../shared/result';
+import type { SerializedResult } from '../shared/result';
 
-function unwrap<T>(res: LorraResult<T>, fallback: T): T {
+function unwrap<T>(res: SerializedResult<T>, fallback: T): T {
   return res.ok ? res.value : fallback;
 }
 
-function errOf<T>(res: LorraResult<T>): string {
+function errOf<T>(res: SerializedResult<T>): string {
   return !res.ok ? res.error.message || res.error.code : '';
 }
 

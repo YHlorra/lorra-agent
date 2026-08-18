@@ -57,15 +57,15 @@ import { makeLorraMock, type LorraMock } from './lorra-test-helpers';
 // 生产形状 IPC 信封(SerializedResult,与 preload 透传同款)。
 // ---------------------------------------------------------------------------
 
-function okSkills(data: SkillXray): { status: 'ok'; value: SkillXray } {
-  return { status: 'ok', value: data };
+function okSkills(data: SkillXray): { ok: true; value: SkillXray } {
+  return { ok: true, value: data };
 }
 
 function errSkills(
   code: string,
   message: string,
-): { status: 'error'; error: { code: string; message: string } } {
-  return { status: 'error', error: { code, message } };
+): { ok: false; error: { code: string; message: string } } {
+  return { ok: false, error: { code, message } };
 }
 
 // ---------------------------------------------------------------------------
@@ -133,6 +133,10 @@ function ago(min: number): number {
 }
 
 interface SkillsLorraMock extends LorraMock {
+  memory: {
+    getExperienceAudit: Mock;
+    okfCheck: Mock;
+  };
   skills: {
     xray: Mock;
     setEnabled: Mock;
@@ -146,17 +150,24 @@ interface SkillsLorraMock extends LorraMock {
 
 function installSkillsLorraMock(): SkillsLorraMock {
   const m = makeLorraMock() as SkillsLorraMock;
+  m.memory = {
+    getExperienceAudit: vi.fn().mockResolvedValue({ ok: true, value: null }),
+    okfCheck: vi.fn().mockResolvedValue({
+      ok: true,
+      value: { path: '', type: 'Skill', generated: false, verified: true, issues: [] },
+    }),
+  };
   m.skills = {
     xray: vi.fn().mockResolvedValue(okSkills(makeXray())),
-    setEnabled: vi.fn().mockResolvedValue({ status: 'ok', value: undefined }),
-    cleanDangling: vi.fn().mockResolvedValue({ status: 'ok', value: { cleaned: 1 } }),
+    setEnabled: vi.fn().mockResolvedValue({ ok: true, value: undefined }),
+    cleanDangling: vi.fn().mockResolvedValue({ ok: true, value: { cleaned: 1 } }),
     collect: vi.fn().mockResolvedValue({
-      status: 'ok',
+      ok: true,
       value: { moved: 0, linked: 0, conflicts: [], notes: [] },
     }),
-    checkUpdates: vi.fn().mockResolvedValue({ status: 'ok', value: {} }),
-    updateAll: vi.fn().mockResolvedValue({ status: 'ok', value: { updated: [], skipped: [] } }),
-    setWsEnabled: vi.fn().mockResolvedValue({ status: 'ok', value: undefined }),
+    checkUpdates: vi.fn().mockResolvedValue({ ok: true, value: {} }),
+    updateAll: vi.fn().mockResolvedValue({ ok: true, value: { updated: [], skipped: [] } }),
+    setWsEnabled: vi.fn().mockResolvedValue({ ok: true, value: undefined }),
   };
   Object.defineProperty(window, 'lorra', { value: m, writable: true, configurable: true });
   return m;
@@ -534,7 +545,7 @@ describe('Requirement: 本工作区开关(setWsEnabled IPC)', () => {
   it('Given setWsEnabled 失败 When 点击 Then 开关状态不变 + 页内动作错误横幅展示 LorraError 文案', async () => {
     const user = userEvent.setup();
     mock.skills.setWsEnabled.mockResolvedValue({
-      status: 'error',
+      ok: false,
       error: { code: 'skills-toggle-failed', message: '本工作区启停写入失败' },
     });
     await renderPage(xray);
@@ -616,7 +627,7 @@ describe('Requirement: 清理悬空', () => {
       okSkills(makeXray({ dangling: ['E:/ws/.lorra/skills/broken'] })),
     );
     mock.skills.cleanDangling.mockResolvedValue({
-      status: 'error',
+      ok: false,
       error: { code: 'clean-failed', message: '悬空链接清理失败' },
     });
     render(<SkillsPage />);
@@ -775,6 +786,64 @@ describe('Requirement: 技能详情弹层', () => {
     expect(git.textContent).toContain('有更新');
   });
 
+  it('Scenario generated skill 详情弹层展示 provenance 与 OKF 状态', async () => {
+    const user = userEvent.setup();
+    mock.skills.xray.mockResolvedValue(
+      okSkills(
+        makeXray({
+          skills: [
+            makeSkill({
+              name: 'generated-a',
+              source: 'workspace',
+              filePath: 'E:/ws/.lorra/skills/generated/generated-a/SKILL.md',
+              realPath: 'E:/ws/.lorra/skills/generated/generated-a/SKILL.md',
+            }),
+          ],
+          stats: { 'generated-a': makeStats({ totalCount: 2, recentCount: 2, lastUsedAt: ago(30) }) },
+        }),
+      ),
+    );
+    mock.memory.getExperienceAudit.mockResolvedValue({
+      ok: true,
+      value: {
+        skillName: 'generated-a',
+        generated: true,
+        filePath: 'E:/ws/.lorra/skills/generated/generated-a/SKILL.md',
+        caseIds: ['case-1'],
+        entryIds: ['mem-1'],
+        warnings: ['verified=false'],
+      },
+    });
+    mock.memory.okfCheck.mockResolvedValue({
+      ok: true,
+      value: {
+        path: 'E:/ws/.lorra/skills/generated/generated-a/SKILL.md',
+        type: 'Skill',
+        generated: true,
+        verified: false,
+        issues: [{ level: 'info', code: 'unverified', message: 'verified 未声明或为 false' }],
+      },
+    });
+
+    render(<SkillsPage />);
+    await screen.findAllByTestId('skills-hero-card');
+    await user.click(within(row('generated-a')).getByText('generated-a'));
+    const modal = await screen.findByTestId('skills-detail-modal');
+
+    expect(await within(modal).findByTestId('skills-detail-provenance')).toHaveTextContent(
+      'case:case-1',
+    );
+    expect(within(modal).getByTestId('skills-detail-provenance')).toHaveTextContent('entry:mem-1');
+    expect(within(modal).getByTestId('skills-detail-provenance')).toHaveTextContent('verified=false');
+    expect(within(modal).getByTestId('skills-detail-okf')).toHaveTextContent(
+      'verified 未声明或为 false',
+    );
+    expect(mock.memory.getExperienceAudit).toHaveBeenCalledWith('generated-a');
+    expect(mock.memory.okfCheck).toHaveBeenCalledWith(
+      'E:/ws/.lorra/skills/generated/generated-a/SKILL.md',
+    );
+  });
+
   it('Scenario 点开关单元格不冒泡开弹层', async () => {
     const user = userEvent.setup();
     await renderPage(detailXray);
@@ -842,7 +911,7 @@ describe('Requirement: 页头收集 / 安装 / 更新入口', () => {
   it('Scenario 收集散乱技能:collect(wsPath) 被调用,结果提示条展示 移动/建链/冲突/说明', async () => {
     const user = userEvent.setup();
     mock.skills.collect.mockResolvedValue({
-      status: 'ok',
+      ok: true,
       value: {
         moved: 2,
         linked: 1,
@@ -862,7 +931,7 @@ describe('Requirement: 页头收集 / 安装 / 更新入口', () => {
   it('Scenario 收集失败 → 动作错误横幅', async () => {
     const user = userEvent.setup();
     mock.skills.collect.mockResolvedValue({
-      status: 'error',
+      ok: false,
       error: { code: 'skills-collect-failed', message: '收集失败' },
     });
     await renderPage(oneSkillXray());
@@ -874,7 +943,7 @@ describe('Requirement: 页头收集 / 安装 / 更新入口', () => {
   it('Scenario 检查更新:behind 计数 >0 → 「更新 N 个」按钮出现 → updateAll 调用 → 结果提示条', async () => {
     const user = userEvent.setup();
     mock.skills.checkUpdates.mockResolvedValue({
-      status: 'ok',
+      ok: true,
       value: {
         'git-a': { gitUrl: 'https://github.com/x/a', behind: true, dirty: false },
         'git-b': { gitUrl: 'https://github.com/x/b', behind: true, dirty: false },
@@ -882,7 +951,7 @@ describe('Requirement: 页头收集 / 安装 / 更新入口', () => {
       },
     });
     mock.skills.updateAll.mockResolvedValue({
-      status: 'ok',
+      ok: true,
       value: {
         updated: ['git-a', 'git-b'],
         skipped: ['git-c：本地已修改，跳过'],
@@ -905,7 +974,7 @@ describe('Requirement: 页头收集 / 安装 / 更新入口', () => {
   it('Scenario 检查更新失败 → 动作错误横幅', async () => {
     const user = userEvent.setup();
     mock.skills.checkUpdates.mockResolvedValue({
-      status: 'error',
+      ok: false,
       error: { code: 'skills-check-updates-failed', message: '更新检查失败' },
     });
     await renderPage(oneSkillXray());

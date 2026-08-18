@@ -37,7 +37,9 @@ interface ChatPaneProps {
   defaultModelName: string | null;
   inlineError: string;
   onOpenProviders: () => void;
-  onSend: (text: string) => Promise<void>;
+  // App 的 sendMessage 实际返回「是否被 driver 受理」供消息队列出队解锁(2026-08-17);
+  // 本组件不消费返回值,用 unknown 放行 void/boolean 两类实现。
+  onSend: (text: string, images?: Array<{ fileId: string }>) => Promise<unknown>;
   onAbort: () => Promise<void>;
   /** 新建 Agent 对话(顶栏 + 空态 hero);缺省 = 不渲染可点行为。 */
   onCreateSession?: () => void;
@@ -46,6 +48,12 @@ interface ChatPaneProps {
   /** 「问 AI」引用胶囊(单选替换,不做多胶囊)。 */
   references?: ComposerReference[];
   onClearReferences?: () => void;
+  /** 待发送队列(2026-08-17):agent 忙碌时发送的消息排队,透传 Composer。 */
+  queue?: Array<{ id: string; text: string }>;
+  onQueue?: (text: string) => void;
+  onQueueRemove?: (id: string) => void;
+  onQueueEdit?: (id: string, text: string) => void;
+  onQueueSendNow?: (id: string) => void;
   /** 工具行「在中栏打开」(diff 卡)。 */
   onOpenFile?: (target: string) => void;
   /** diff 卡「接受」。 */
@@ -71,6 +79,8 @@ interface ChatPaneProps {
   onResolveFileRef?: (fileId: string) => Promise<string | null>;
   /** @ 选中文件后追加引用胶囊。 */
   onAppendReference?: (ref: ComposerReference) => void;
+  /** 当前工作区绝对路径（拖拽文件填充相对路径用）。 */
+  workspacePath?: string | null;
   /**
  * thinking 流时间锚点(messageId → 首个 partial ts)。reducer 折叠后 events
  * 里无 partial,组时间/思考耗时依赖此锚点;缺省 = 直传事件流路径,内部自记。
@@ -266,9 +276,15 @@ export function ChatPane(props: ChatPaneProps): JSX.Element {
         emptyStateMessage={hasEvents || !props.modelAvailable ? '' : t('chat.waitingAi')}
         references={props.references}
         onClearReferences={props.onClearReferences}
+        queue={props.queue}
+        onQueue={props.onQueue}
+        onQueueRemove={props.onQueueRemove}
+        onQueueEdit={props.onQueueEdit}
+        onQueueSendNow={props.onQueueSendNow}
         onFileCandidates={props.onFileCandidates}
         onResolveFileRef={props.onResolveFileRef}
         onAppendReference={props.onAppendReference}
+        workspacePath={props.workspacePath}
       />
     </section>
   );

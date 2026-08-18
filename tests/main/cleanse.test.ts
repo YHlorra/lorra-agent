@@ -351,3 +351,43 @@ describe('cleanseSession', () => {
     expect(err({ code: 'x', message: 'y' }).isErr()).toBe(true);
   });
 });
+
+// model_change 形状(2026-08-14):SDK 新形状 model 单字段("provider/modelId" 串),
+// 旧 provider+modelId 在 collector 层归一为同一字符串;cleanse 只认统一后的 model。
+describe('cleanseSession model_change', () => {
+  it('新形状 model 单字段 → fact.model = 原样字符串', () => {
+    const entries = [
+      msg({ id: 'm1', parentId: null, offsetMs: 5_000, role: 'user', text: 'hi' }),
+      msg({ id: 'm2', parentId: 'm1', offsetMs: 40_000, role: 'assistant', text: 'yo' }),
+      {
+        id: 'mc1',
+        parentId: 'm2',
+        timestamp: T0 + 50_000,
+        modelChange: { model: 'opencode-go/deepseek-v4-flash' },
+      },
+    ];
+    const fact = expectOkFact(cleanseSession(HEADER, entries, 'ws'));
+    expect(fact.model).toBe('opencode-go/deepseek-v4-flash');
+  });
+
+  it('活跃路径最后 model_change 生效(覆盖旧值)', () => {
+    const entries = [
+      msg({ id: 'm1', parentId: null, offsetMs: 5_000, role: 'user', text: 'hi' }),
+      {
+        id: 'mc1',
+        parentId: 'm1',
+        timestamp: T0 + 10_000,
+        modelChange: { model: 'a/b' },
+      },
+      msg({ id: 'm2', parentId: 'mc1', offsetMs: 40_000, role: 'assistant', text: 'yo' }),
+      {
+        id: 'mc2',
+        parentId: 'm2',
+        timestamp: T0 + 50_000,
+        modelChange: { model: 'c/d' },
+      },
+    ];
+    const fact = expectOkFact(cleanseSession(HEADER, entries, 'ws'));
+    expect(fact.model).toBe('c/d');
+  });
+});

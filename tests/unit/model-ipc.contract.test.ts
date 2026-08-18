@@ -284,7 +284,7 @@ describe('IPC contract — credential zero-transit (/D3, spec 凭证零穿越)',
   // -----------------------------------------------------------------
   // The actual contract: LorraApi['providers'] and LorraApi['models'].
   // Every method's Parameters AND ReturnType (through Promise →
-  // RpcEnvelope → data → DTOs, recursively) must be free of
+  // SerializedResult → data → DTOs, recursively) must be free of
   // credential-named fields. Violations surface as a typecheck
   // failure.
   //

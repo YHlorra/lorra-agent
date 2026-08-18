@@ -1,12 +1,4 @@
-import {
-  Archive,
-  BookOpenCheck,
-  CalendarDays,
-  Cpu,
-  LayoutDashboard,
-  Settings,
-  Sparkles,
-} from 'lucide-react';
+import { Archive, BookOpenCheck, CalendarDays, Cpu, LayoutDashboard, Settings } from 'lucide-react';
 import type { JSX } from 'react';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { type AppPage, useAppStore } from '@/lib/app-store';
@@ -21,9 +13,9 @@ export interface NavItem {
   disabled?: boolean;
 }
 
-// 页面路由(design.md .1):工作台/今日/记忆/模型配置/技能/设置;模式切换为占位(后续接入)。
-// 今日页独立于工作区,位于第 2 位(app-shell spec);记忆页第 3 位(phase3 6.9);
-// 技能页第 5 位(skill-manager V1, 图标栏第 5 入口),置于设置之后、模式切换之前。
+// 页面路由(design.md .1):工作台/今日/记忆/模型配置/设置/技能;今日页独立于工作区,
+// 位于第 2 位(app-shell spec);记忆页第 3 位(phase3 6.9);技能页第 6 位
+// (skill-manager V1, 图标栏入口)。仅保留真实页面入口,占位不再保留。
 export const NAV_ITEMS: NavItem[] = [
   { page: 'workspace', labelKey: 'nav.workspace', icon: LayoutDashboard },
   { page: 'today', labelKey: 'nav.today', icon: CalendarDays },
@@ -31,7 +23,6 @@ export const NAV_ITEMS: NavItem[] = [
   { page: 'providers', labelKey: 'nav.providers', icon: Cpu },
   { page: 'settings', labelKey: 'nav.settings', icon: Settings },
   { page: 'skills', labelKey: 'nav.skills', icon: BookOpenCheck },
-  { labelKey: 'nav.modeSwitch', icon: Sparkles, disabled: true },
 ];
 
 export function IconBar({ collapsed }: { collapsed: boolean }): JSX.Element {
@@ -63,10 +54,7 @@ export function IconBar({ collapsed }: { collapsed: boolean }): JSX.Element {
                     aria-current={active ? 'page' : undefined}
                     disabled={item.disabled}
                     onClick={target ? () => setPage(target) : undefined}
-                    className={cn(
-                      'flex h-9 w-9 items-center justify-center rounded-kami text-ink-tertiary transition-colors hover:bg-paper hover:text-navy disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent',
-                      active && 'bg-overlay text-navy',
-                    )}
+                    className={cn('icon-nav-btn', active && 'icon-nav-btn-active')}
                   >
                     <Icon className="h-4 w-4" aria-hidden="true" />
                   </button>

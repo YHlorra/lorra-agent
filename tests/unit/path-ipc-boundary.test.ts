@@ -31,7 +31,7 @@ describe('fs IPC boundary', () => {
     const tree = calls.find((c) => c.channel === 'lorra.fs.tree');
     expect(tree).toBeDefined();
     const result = await tree?.handler(null, { directoryId: 'ws-root' });
-    expect(result).toMatchObject({ status: 'error', error: { code: 'no-workspace' } });
+    expect(result).toMatchObject({ ok: false, error: { code: 'no-workspace' } });
   });
 
   it('lorra.fs.open accepts only opaque fileId', async () => {
@@ -40,7 +40,7 @@ describe('fs IPC boundary', () => {
     const open = calls.find((c) => c.channel === 'lorra.fs.open');
     expect(open).toBeDefined();
     const result = await open?.handler(null, { fileId: 'fake-id' });
-    expect(result).toMatchObject({ status: 'error', error: { code: 'no-workspace' } });
+    expect(result).toMatchObject({ ok: false, error: { code: 'no-workspace' } });
   });
 
   it('rejects arbitrary path arguments by signature (no path field)', () => {

@@ -7,6 +7,7 @@ import { dayConceptPath, sessionConceptPath, writeConcept } from '../../src/main
 import { buildSessionConcept } from '../../src/main/ofk/session-writer';
 import { FACTS_SCHEMA_VERSION, factIdOf, type SessionFact } from '../../src/shared/facts-schema';
 import type { SessionCategory } from '../../src/shared/ofk-schema';
+import { DEFAULT_TAGS } from '../../src/shared/ofk-schema';
 
 /**
  * OFK 测试夹具(/P5 共用):往 LORRA_E2E_USERDATA 指向的 bundle
@@ -104,7 +105,7 @@ export async function seedConcept(opts: SeedConceptOpts): Promise<SessionFact> {
       },
     },
   ];
-  const doc = buildSessionConcept(fact, sequence, opts.category ?? 'uncategorized');
+  const doc = buildSessionConcept(fact, sequence, opts.category ?? '未分类');
   const written = await writeConcept(sessionConceptPath(fact), doc);
   if (written.isErr()) throw new Error(`seedConcept failed: ${written.error.message}`);
   return fact;
@@ -126,24 +127,28 @@ export async function seedDigest(
   generatedAt: string = FUTURE_GENERATED_AT,
   /** undefined → 写缺省 segments 块;null → 不写(模拟存量摘要);数组 → 原样写。 */
   segments?: DigestSegmentSeed[] | null,
+  /** tags 列表;undefined → 写内置 DEFAULT_TAGS(与 compileDay 缺省一致 → 不 stale);null → 不写。 */
+  tags?: string[] | null,
 ): Promise<void> {
   const segs: DigestSegmentSeed[] =
     segments === undefined
       ? [
           {
             ref: 'sess-x',
-            category: 'work',
+            category: '工作',
             start: new Date(2026, 7, 8, 9).toISOString(),
             end: new Date(2026, 7, 8, 9, 30).toISOString(),
           },
         ]
       : (segments ?? []);
+  const tagLine = tags === null ? [] : [`tags: [${(tags ?? [...DEFAULT_TAGS]).join(', ')}]`];
   const doc = [
     '---',
     'type: Daily Digest',
     `title: ${day} 摘要`,
     `date: ${day}`,
     `workspace: ${slug}`,
+    ...tagLine,
     ...(segs.length > 0 ? ['segments:'] : []),
     ...segs.flatMap((s) => [
       `  - ref: ${s.ref}`,

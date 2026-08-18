@@ -2,7 +2,7 @@ import { createElement } from 'react';
 import { beforeEach, vi } from 'vitest';
 import '@testing-library/jest-dom/vitest';
 import { useAppStore } from '@/lib/app-store';
-import type { LorraResult } from '../shared/result';
+import type { SerializedResult } from '../shared/result';
 
 // react-resizable-panels v4 在 jsdom 下与 user-event 打字冲突(实测:同一受控
 // input,无 Separator 时打字正常,有 Separator 时不响应;真实浏览器无此问题,
@@ -116,10 +116,10 @@ declare global {
   var __lorraStub: { workspacePath: string | null } | undefined;
 }
 
-// better-result v3 迁移:preload 经 toView 输出渲染层形状 {ok,value}/{ok,error},
-// 消费方以 res.ok 判别;stub 必须同形状(旧 BR 实例是 {status:'ok'},res.ok 恒为 undefined)。
-const okRpc = <T>(value: T): Promise<LorraResult<T>> => Promise.resolve({ ok: true, value });
-const errorRpc = (code: string, message: string): Promise<LorraResult<never>> =>
+// IPC 信封单一形状:preload 直传 SerializedResult({ok,value}/{ok,error}),
+// 消费方以 res.ok 判别;stub 必须同形状。
+const okRpc = <T>(value: T): Promise<SerializedResult<T>> => Promise.resolve({ ok: true, value });
+const errorRpc = (code: string, message: string): Promise<SerializedResult<never>> =>
   Promise.resolve({ ok: false, error: { code, message } });
 
 const stub = {
@@ -127,6 +127,7 @@ const stub = {
   app: {
     info: () => Promise.resolve({ version: '0.0.0-test', name: 'lorra' }),
     licenses: () => Promise.resolve([]),
+    openExternal: () => Promise.resolve(true),
   },
   window: {
     minimize: () => Promise.resolve(true),
@@ -163,6 +164,7 @@ const stub = {
     search: () => okRpc([] as Array<{ fileId: string; name: string }>),
     open: () => errorRpc('not-implemented', 'no fs stub'),
     openBinary: () => errorRpc('not-implemented', 'no fs stub'),
+    resolveWikilink: () => errorRpc('not-implemented', 'no wikilink stub'),
   },
   annotations: {
     list: () => errorRpc('not-implemented', 'no annotations stub'),
@@ -214,6 +216,17 @@ const stub = {
           available: true,
         },
       ]),
+  },
+  clipboard: {
+    // 粘贴图片 stub(2026-08-15 修复):真实 IPC 返回 SerializedResult(ok 判别),
+    // composer.handlePaste 依据 res.ok 判定,故此处用 ok 形状。
+    saveImage: () =>
+      okRpc({
+        fileId: '.lorra/attachments/paste-stub.png',
+        name: 'paste-stub.png',
+        dataUrl:
+          'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
+      }),
   },
 };
 

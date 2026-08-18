@@ -15,7 +15,7 @@ import { type BuiltinCollector, createJsonlCollector } from './collector-core';
  * 目录/格式不存在 → Ok([]) fail-open。
  */
 
-export const WORKBUDDY_RUNTIME = 'workbuddy';
+const WORKBUDDY_RUNTIME = 'workbuddy';
 
 export function createWorkbuddyCollector(): BuiltinCollector {
   return createJsonlCollector({

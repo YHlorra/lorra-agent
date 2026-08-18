@@ -31,6 +31,7 @@ type GetResult = SerializedResult<{
   defaultHideThinking: boolean;
   compileModel: { providerId: string; modelId: string } | null;
   dataSources: { claudeCode: boolean; opencode: boolean; ohMyPi: boolean; workbuddy: boolean };
+  tags: string[];
 }>;
 
 describe('lorra.settings.get/set(语言真源)', () => {
@@ -64,14 +65,15 @@ describe('lorra.settings.get/set(语言真源)', () => {
     );
 
     const res = await get();
-    expect(res.status).toBe('ok');
-    if (res.status === 'ok') {
+    expect(res.ok).toBe(true);
+    if (res.ok) {
       expect(res.value).toEqual({
         showHiddenFiles: true,
         language: 'en',
         defaultHideThinking: false,
         compileModel: null,
         dataSources: { claudeCode: false, opencode: false, ohMyPi: false, workbuddy: false },
+        tags: ['工作', '编程', '阅读', '闲聊', '项目'],
       });
     }
   });
@@ -83,17 +85,17 @@ describe('lorra.settings.get/set(语言真源)', () => {
       'utf8',
     );
     const missing = await get();
-    expect(missing.status === 'ok' && missing.value.language).toBe('zh');
-    expect(missing.status === 'ok' && missing.value.defaultHideThinking).toBe(false);
+    expect(missing.ok && missing.value.language).toBe('zh');
+    expect(missing.ok && missing.value.defaultHideThinking).toBe(false);
 
     writeFileSync(settingsPath(), JSON.stringify({ recentWorkspaces: [], language: 'ja' }), 'utf8');
     const unknown = await get();
-    expect(unknown.status === 'ok' && unknown.value.language).toBe('zh');
-    expect(unknown.status === 'ok' && unknown.value.showHiddenFiles).toBe(false);
+    expect(unknown.ok && unknown.value.language).toBe('zh');
+    expect(unknown.ok && unknown.value.showHiddenFiles).toBe(false);
 
     writeFileSync(settingsPath(), '{corrupt', 'utf8');
     const corrupt = await get();
-    expect(corrupt.status === 'ok' && corrupt.value.language).toBe('zh');
+    expect(corrupt.ok && corrupt.value.language).toBe('zh');
   });
 
   it('set 带 language 写回后 get 读到同值', async () => {
@@ -101,15 +103,15 @@ describe('lorra.settings.get/set(语言真源)', () => {
     expect(setHandler).toBeDefined();
     if (!setHandler) throw new Error('handler missing');
     const setRes = (await setHandler(null, { language: 'en' })) as SerializedResult<void>;
-    expect(setRes.status).toBe('ok');
+    expect(setRes.ok).toBe(true);
 
     const res = await get();
-    expect(res.status === 'ok' && res.value.language).toBe('en');
+    expect(res.ok && res.value.language).toBe('en');
   });
 
   it('defaultHideThinking 缺省 → false;set 写回 true 后 get 读到同值且不影响其他字段', async () => {
     const fresh = await get();
-    expect(fresh.status === 'ok' && fresh.value.defaultHideThinking).toBe(false);
+    expect(fresh.ok && fresh.value.defaultHideThinking).toBe(false);
 
     const setHandler = electronMock.handlers.get('lorra.settings.set');
     expect(setHandler).toBeDefined();
@@ -118,13 +120,13 @@ describe('lorra.settings.get/set(语言真源)', () => {
       defaultHideThinking: true,
       showHiddenFiles: true,
     })) as SerializedResult<void>;
-    expect(setRes.status).toBe('ok');
+    expect(setRes.ok).toBe(true);
 
     const after = await get();
-    expect(after.status === 'ok' && after.value.defaultHideThinking).toBe(true);
-    expect(after.status === 'ok' && after.value.showHiddenFiles).toBe(true);
+    expect(after.ok && after.value.defaultHideThinking).toBe(true);
+    expect(after.ok && after.value.showHiddenFiles).toBe(true);
     // 未显式写入的 language 保持缺省 zh。
-    expect(after.status === 'ok' && after.value.language).toBe('zh');
+    expect(after.ok && after.value.language).toBe('zh');
   });
 });
 
@@ -159,19 +161,19 @@ describe('lorra.settings compileModel（语义清洗模型）', () => {
     const setRes = (await setHandler(null, {
       compileModel: { providerId: 'ollama', modelId: 'qwen2.5' },
     })) as SerializedResult<void>;
-    expect(setRes.status).toBe('ok');
+    expect(setRes.ok).toBe(true);
 
     const res = await get();
-    expect(res.status === 'ok' && res.value.compileModel).toEqual({
+    expect(res.ok && res.value.compileModel).toEqual({
       providerId: 'ollama',
       modelId: 'qwen2.5',
     });
 
     // null = 清除 → 回跟随默认
     const clearRes = (await setHandler(null, { compileModel: null })) as SerializedResult<void>;
-    expect(clearRes.status).toBe('ok');
+    expect(clearRes.ok).toBe(true);
     const afterClear = await get();
-    expect(afterClear.status === 'ok' && afterClear.value.compileModel).toBeNull();
+    expect(afterClear.ok && afterClear.value.compileModel).toBeNull();
   });
 
   it('非法形状落 null（不清除其他字段）', async () => {
@@ -182,15 +184,15 @@ describe('lorra.settings compileModel（语义清洗模型）', () => {
     const bad = (await setHandler(null, {
       compileModel: { providerId: '', modelId: 'x' },
     })) as SerializedResult<void>;
-    expect(bad.status).toBe('ok');
+    expect(bad.ok).toBe(true);
 
     const res = await get();
-    expect(res.status === 'ok' && res.value.compileModel).toBeNull();
+    expect(res.ok && res.value.compileModel).toBeNull();
   });
 
   it('缺省 → null;settings.json 预置 compileModel 读回', async () => {
     const missing = await get();
-    expect(missing.status === 'ok' && missing.value.compileModel).toBeNull();
+    expect(missing.ok && missing.value.compileModel).toBeNull();
 
     writeFileSync(
       settingsPath(),
@@ -201,7 +203,7 @@ describe('lorra.settings compileModel（语义清洗模型）', () => {
       'utf8',
     );
     const preset = await get();
-    expect(preset.status === 'ok' && preset.value.compileModel).toEqual({
+    expect(preset.ok && preset.value.compileModel).toEqual({
       providerId: 'openai',
       modelId: 'gpt-4o',
     });
@@ -232,7 +234,7 @@ describe('lorra.settings dataSources（数据源开关）', () => {
 
   it('缺省全关;set 单个开关写回后 get 读到同值,其余保持关闭', async () => {
     const missing = await get();
-    expect(missing.status === 'ok' && missing.value.dataSources).toEqual({
+    expect(missing.ok && missing.value.dataSources).toEqual({
       claudeCode: false,
       opencode: false,
       ohMyPi: false,
@@ -245,10 +247,10 @@ describe('lorra.settings dataSources（数据源开关）', () => {
     const setRes = (await setHandler(null, {
       dataSources: { claudeCode: true },
     })) as SerializedResult<void>;
-    expect(setRes.status).toBe('ok');
+    expect(setRes.ok).toBe(true);
 
     const res = await get();
-    expect(res.status === 'ok' && res.value.dataSources).toEqual({
+    expect(res.ok && res.value.dataSources).toEqual({
       claudeCode: true,
       opencode: false,
       ohMyPi: false,
@@ -264,7 +266,7 @@ describe('lorra.settings dataSources（数据源开关）', () => {
     await setHandler(null, { dataSources: { ohMyPi: true } });
 
     const res = await get();
-    expect(res.status === 'ok' && res.value.dataSources).toEqual({
+    expect(res.ok && res.value.dataSources).toEqual({
       claudeCode: false,
       opencode: true,
       ohMyPi: true,
@@ -282,11 +284,85 @@ describe('lorra.settings dataSources（数据源开关）', () => {
       'utf8',
     );
     const res = await get();
-    expect(res.status === 'ok' && res.value.dataSources).toEqual({
+    expect(res.ok && res.value.dataSources).toEqual({
       claudeCode: true,
       opencode: false,
       ohMyPi: false,
       workbuddy: false,
     });
+  });
+});
+
+describe('lorra.settings tags(2026-08-14 今日页标签列表)', () => {
+  let userdata: string;
+  const settingsPath = () => path.join(userdata, 'settings.json');
+
+  beforeEach(() => {
+    userdata = mkdtempSync(path.join(tmpdir(), 'lorra-settings-tags-'));
+    electronMock.userData = userdata;
+    electronMock.handlers.clear();
+    registerSettingsHandlers();
+  });
+
+  afterEach(() => {
+    electronMock.handlers.clear();
+    rmSync(userdata, { recursive: true, force: true });
+  });
+
+  async function get(): Promise<GetResult> {
+    const handler = electronMock.handlers.get('lorra.settings.get');
+    expect(handler).toBeDefined();
+    if (!handler) throw new Error('handler missing');
+    return (await handler(null)) as GetResult;
+  }
+
+  it('缺省 = 内置 DEFAULT_TAGS(5 项)', async () => {
+    const res = await get();
+    expect(res.ok && res.value.tags).toEqual(['工作', '编程', '阅读', '闲聊', '项目']);
+  });
+
+  it('set 往返: 写入自定义列表 → get 读到同值;空数组清除(回缺省)', async () => {
+    const setHandler = electronMock.handlers.get('lorra.settings.set');
+    expect(setHandler).toBeDefined();
+    if (!setHandler) throw new Error('handler missing');
+
+    const setRes = (await setHandler(null, {
+      tags: ['工作', '写作', ' 工作 ', '', '  ', '设计'],
+    })) as SerializedResult<void>;
+    expect(setRes.ok).toBe(true);
+
+    const res = await get();
+    // trim + 去重 + 空串过滤
+    expect(res.ok && res.value.tags).toEqual(['工作', '写作', '设计']);
+
+    // 空数组 → undefined 省略 → get 回缺省
+    const clearRes = (await setHandler(null, { tags: [] })) as SerializedResult<void>;
+    expect(clearRes.ok).toBe(true);
+    const afterClear = await get();
+    expect(afterClear.ok && afterClear.value.tags).toEqual([
+      '工作',
+      '编程',
+      '阅读',
+      '闲聊',
+      '项目',
+    ]);
+  });
+
+  it('规范化: 非字符串/非法形状回退(不写 tags);超 30 项截断', async () => {
+    const setHandler = electronMock.handlers.get('lorra.settings.set');
+    expect(setHandler).toBeDefined();
+    if (!setHandler) throw new Error('handler missing');
+    const many = Array.from({ length: 40 }, (_, i) => `tag${i}`);
+    await setHandler(null, { tags: many } as never);
+
+    const res = await get();
+    expect(res.ok && res.value.tags).toHaveLength(30);
+    expect(res.ok && res.value.tags[0]).toBe('tag0');
+    expect(res.ok && res.value.tags[29]).toBe('tag29');
+
+    // settings.json 预置非法形状(非数组)→ 回缺省
+    writeFileSync(settingsPath(), JSON.stringify({ recentWorkspaces: [], tags: 'nope' }), 'utf8');
+    const bad = await get();
+    expect(bad.ok && bad.value.tags).toEqual(['工作', '编程', '阅读', '闲聊', '项目']);
   });
 });

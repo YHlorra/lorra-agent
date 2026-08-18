@@ -26,6 +26,7 @@ import { err, ok, toLorraError } from '../../shared/result';
 import { tMain } from '../i18n';
 import { memoryDocPath, writeConceptSync } from '../ofk/ofk-bundle';
 import { entryIdOf } from './entry-hash';
+import { truncateUtf8ToBytes } from './text-bytes';
 
 /**
  * 记忆存储核心(phase3-contract 6.1 建表 / + + ):
@@ -254,19 +255,6 @@ function firstLine(content: string): string {
       .find((l) => l.trim().length > 0)
       ?.trim() ?? '';
   return line.slice(0, 120).replace(/\r/g, '');
-}
-
-/** utf8 字节级截断,不劈开多字节字符。 */
-function truncateUtf8ToBytes(text: string, maxBytes: number): string {
-  if (Buffer.byteLength(text, 'utf8') <= maxBytes) return text;
-  let low = 0;
-  let high = text.length;
-  while (low < high) {
-    const mid = Math.ceil((low + high) / 2);
-    if (Buffer.byteLength(text.slice(0, mid), 'utf8') <= maxBytes) low = mid;
-    else high = mid - 1;
-  }
-  return text.slice(0, low);
 }
 
 /** 段落感知摘要:首段优先,叠加后续段落直到 ≤ 上限(utf8 字节)。 */

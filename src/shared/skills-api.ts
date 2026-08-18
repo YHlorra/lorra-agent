@@ -20,6 +20,8 @@ export const SKILLS_IPC = Object.freeze({
   updateAll: 'lorra.skills.updateAll',
   /** 按工作区停用/启用（newmax 式）：写 workspaceSkillOverrides[wsRealpath]。 */
   setWsEnabled: 'lorra.skills.setWsEnabled',
+  /** 读取技能文件内容（composer /skill 触发，2026-08-14）；未知技能 → skill-not-found。 */
+  read: 'lorra.skills.read',
 } as const);
 
 // ---- 预算常量（PM 拍板定稿：token 唯一单位，三级分级 2,000/4,000）----
@@ -43,8 +45,14 @@ export const SKILL_GIT_TIMEOUT_MS = 30000;
 
 // ---- 发现/健康 ----
 
-/** 技能来源：收集根 / 祖先 .agents/skills / lorra 全局库 / 用户自有 / 工作区。 */
-export type SkillSource = 'collection' | 'workspace' | 'lorra-global' | 'user' | 'ancestor';
+/** 技能来源：收集根 / 祖先 .agents/skills / lorra 全局库 / 用户自有 / 工作区 / agent-plugin 插件。 */
+export type SkillSource =
+  | 'collection'
+  | 'workspace'
+  | 'lorra-global'
+  | 'user'
+  | 'ancestor'
+  | 'agent-plugin';
 
 /**
  * 可见性作用域：global = 处处触发（collection/lorra-global/user 源）；
@@ -173,12 +181,8 @@ export interface SkillXray {
   workspacePath: string;
 }
 
-// ---- 预留（一键整理结果）----
-
-export interface OrganizeResult {
-  workspacesTouched: number;
-  deduped: number;
-  linked: number;
-  cleaned: number;
-  conflicts: string[];
+/** 技能文件内容（composer /skill 触发；content 为 SKILL.md/平铺 .md 原文，≤1MB）。 */
+export interface SkillReadResult {
+  name: string;
+  content: string;
 }

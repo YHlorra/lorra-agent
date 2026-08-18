@@ -28,25 +28,15 @@ function captureIpcHandlers(): IpcCall[] {
 
 /** IPC 信封收窄:handler 返回值是 SerializedResult<T> 纯数据,运行时校验后取 value。 */
 function okValue<T>(result: unknown): T {
-  if (
-    typeof result === 'object' &&
-    result !== null &&
-    'status' in result &&
-    result.status === 'ok'
-  ) {
-    return (result as { status: 'ok'; value: T }).value;
+  if (typeof result === 'object' && result !== null && 'ok' in result && result.ok === true) {
+    return (result as { ok: true; value: T }).value;
   }
   throw new Error(`expected ok result, got ${JSON.stringify(result)}`);
 }
 
 function errCode(result: unknown): string {
-  if (
-    typeof result === 'object' &&
-    result !== null &&
-    'status' in result &&
-    result.status === 'error'
-  ) {
-    return (result as { status: 'error'; error: { code: string } }).error.code;
+  if (typeof result === 'object' && result !== null && 'ok' in result && result.ok === false) {
+    return (result as { ok: false; error: { code: string } }).error.code;
   }
   throw new Error(`expected error result, got ${JSON.stringify(result)}`);
 }
@@ -100,7 +90,7 @@ describe('lorra.fs.save IPC', () => {
     const baseMtime = statSync(fileAbs).mtimeMs;
     const content = '---\ntitle: 新标题\n---\n\n正文\n';
     const result = await save({ fileId, content, baseMtime });
-    expect(result).toMatchObject({ status: 'ok' });
+    expect(result).toMatchObject({ ok: true });
     const value = okValue<{ mtime: number }>(result);
     expect(value.mtime).toBeGreaterThanOrEqual(baseMtime);
     expect(readFileSync(fileAbs, 'utf8')).toBe(content);
@@ -110,7 +100,7 @@ describe('lorra.fs.save IPC', () => {
     const content = '# hi\nsome text\n\n- [ ] task\n```js\n1+1\n```\n';
     const baseMtime = statSync(fileAbs).mtimeMs;
     const result = await save({ fileId, content, baseMtime });
-    expect(result).toMatchObject({ status: 'ok' });
+    expect(result).toMatchObject({ ok: true });
     expect(readFileSync(fileAbs, 'utf8')).toBe(content);
   });
 
@@ -128,7 +118,7 @@ describe('lorra.fs.save IPC', () => {
 
   it('baseMtime 缺省时不做守卫,直接写入', async () => {
     const result = await save({ fileId, content: 'no guard' });
-    expect(result).toMatchObject({ status: 'ok' });
+    expect(result).toMatchObject({ ok: true });
     expect(readFileSync(fileAbs, 'utf8')).toBe('no guard');
   });
 });

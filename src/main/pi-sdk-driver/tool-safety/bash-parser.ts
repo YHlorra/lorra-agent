@@ -33,7 +33,7 @@ export const MAX_BASH_NESTING = 5;
  * escapes resolved. A quoted group is ONE token (its content retained);
  * unquoted tokens split on whitespace.
  */
-function splitOutsideQuotes(s: string): string[] {
+export function splitOutsideQuotes(s: string): string[] {
   const out: string[] = [];
   let cur = '';
   let i = 0;

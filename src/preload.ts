@@ -1,4 +1,5 @@
-import { contextBridge, ipcRenderer } from 'electron';
+import { contextBridge, ipcRenderer, webUtils } from 'electron';
+import type { SavedClipboardImage } from './main/ipc/clipboard-ipc';
 import type { TodayDayData } from './main/memory/day-summary';
 import type { SessionInfo } from './main/pi-sdk-driver/driver';
 import type {
@@ -11,15 +12,20 @@ import type { Annotation, AnnotationDraft } from './shared/annotations';
 import type { Lang } from './shared/i18n-core';
 import { LICENSES_CHANNEL } from './shared/licenses-api';
 import type {
+  ArchivalAuditDto,
+  CoreProjectionDto,
   CrystallizeArgs,
   DigestFileArgs,
   DigestTextArgs,
   EditArgs,
+  ExperienceAuditDto,
   ListActiveArgs,
   ListEventsArgs,
   MemoryLink,
+  OkfCheckResultDto,
   RetireArgs,
   SearchArgs,
+  WorkingMemorySnapshotDto,
 } from './shared/memory-api';
 import {
   KNOWLEDGE_CHANNEL_READ,
@@ -27,15 +33,21 @@ import {
   MEMORY_CHANNEL_DIGEST_FILE,
   MEMORY_CHANNEL_DIGEST_TEXT,
   MEMORY_CHANNEL_EDIT,
+  MEMORY_CHANNEL_GET_ARCHIVAL_AUDIT,
+  MEMORY_CHANNEL_GET_CORE_PROJECTION,
+  MEMORY_CHANNEL_GET_EXPERIENCE_AUDIT,
+  MEMORY_CHANNEL_GET_WORKING_MEMORY,
   MEMORY_CHANNEL_LIST_ACTIVE,
   MEMORY_CHANNEL_LIST_ARCHIVED,
   MEMORY_CHANNEL_LIST_EVENTS,
   MEMORY_CHANNEL_LIST_LINKS,
+  MEMORY_CHANNEL_OKF_CHECK,
   MEMORY_CHANNEL_RETIRE,
   MEMORY_CHANNEL_SEARCH,
 } from './shared/memory-api';
 import type { MemoryEntry, MemoryEvent } from './shared/memory-schema';
-import { fromSerialized, type SerializedResult, toView } from './shared/result';
+import type { McpServerConfig, PluginsXray } from './shared/plugins-api';
+import type { SerializedResult } from './shared/result';
 import type { GenerateArgs, ReadArgs, ReviewMeta, StoredReview } from './shared/review-api';
 import {
   REVIEW_CHANNEL_GENERATE,
@@ -46,15 +58,21 @@ import {
   type CollectResult,
   SKILLS_IPC,
   type SkillGitStatus,
+  type SkillReadResult,
   type SkillXray,
 } from './shared/skills-api';
 
 /**
  * Preload exposes the IPC surface as `window.lorra.*`. Per the
  * renderer never sees absolute paths or raw credentials — opaque IDs only.
- * IPC carries SerializedResult pure data (methods are stripped cross-process);
- * each bridge method rehydrates it into a better-result `Result` via fromSerialized.
+ * IPC carries the SerializedResult envelope ({ok,value}/{ok,error}) as pure
+ * data (methods are stripped cross-process); every bridge passes it through
+ * unchanged — the renderer narrows on `res.ok` directly.
  */
+
+function invoke<T>(channel: string, payload?: unknown): Promise<SerializedResult<T>> {
+  return ipcRenderer.invoke(channel, payload) as Promise<SerializedResult<T>>;
+}
 
 const lorra = {
   platform: process.platform,
@@ -64,6 +82,8 @@ const lorra = {
       ipcRenderer.invoke(LICENSES_CHANNEL) as Promise<
         import('./shared/licenses-api').OpenSourceProject[]
       >,
+    openExternal: (url: string) =>
+      ipcRenderer.invoke('lorra.app.openExternal', url) as Promise<boolean>,
   },
   window: {
     minimize: () => ipcRenderer.invoke('lorra.window.minimize') as Promise<boolean>,
@@ -81,92 +101,35 @@ const lorra = {
       ipcRenderer.invoke('lorra.workspace.remove', { path }) as Promise<{ workspaces: string[] }>,
   },
   session: {
-    list: async (args: { workspaceId: string }) => {
-      const raw = (await ipcRenderer.invoke('lorra.session.list', args)) as SerializedResult<
-        SessionInfo[]
-      >;
-      return toView(fromSerialized(raw));
-    },
-    open: async (args: { sessionId: string }) => {
-      const raw = (await ipcRenderer.invoke('lorra.session.open', args)) as SerializedResult<{
-        sessionId: string;
-      }>;
-      return toView(fromSerialized(raw));
-    },
-    continueRecent: async (args: { workspaceId: string }) => {
-      const raw = (await ipcRenderer.invoke(
-        'lorra.session.continueRecent',
-        args,
-      )) as SerializedResult<{ sessionId: string }>;
-      return toView(fromSerialized(raw));
-    },
-    create: async (args: { workspaceId: string }) => {
-      const raw = (await ipcRenderer.invoke('lorra.session.new', args)) as SerializedResult<{
-        sessionId: string;
-      }>;
-      return toView(fromSerialized(raw));
-    },
-    send: async (args: { sessionId: string; text: string }) => {
-      const raw = (await ipcRenderer.invoke('lorra.session.send', args)) as SerializedResult<{
-        accepted: boolean;
-        busySessionId?: string;
-      }>;
-      return toView(fromSerialized(raw));
-    },
-    abort: async (args: { sessionId: string }) => {
-      const raw = (await ipcRenderer.invoke('lorra.session.abort', args)) as SerializedResult<true>;
-      return toView(fromSerialized(raw));
-    },
-    compact: async (args: { sessionId: string }) => {
-      const raw = (await ipcRenderer.invoke('lorra.session.compact', args)) as SerializedResult<{
-        accepted: boolean;
-      }>;
-      return toView(fromSerialized(raw));
-    },
-    respondApproval: async (args: {
+    list: (args: { workspaceId: string }) => invoke<SessionInfo[]>('lorra.session.list', args),
+    open: (args: { sessionId: string }) =>
+      invoke<{ sessionId: string }>('lorra.session.open', args),
+    continueRecent: (args: { workspaceId: string }) =>
+      invoke<{ sessionId: string }>('lorra.session.continueRecent', args),
+    create: (args: { workspaceId: string }) =>
+      invoke<{ sessionId: string }>('lorra.session.new', args),
+    send: (args: { sessionId: string; text: string; images?: Array<{ fileId: string }> }) =>
+      invoke<{ accepted: boolean; busySessionId?: string }>('lorra.session.send', args),
+    abort: (args: { sessionId: string }) => invoke<true>('lorra.session.abort', args),
+    compact: (args: { sessionId: string }) =>
+      invoke<{ accepted: boolean }>('lorra.session.compact', args),
+    respondApproval: (args: {
       sessionId: string;
       approvalId: string;
       decision: 'allowOnce' | 'allowAlways' | 'deny';
-    }) => {
-      const raw = (await ipcRenderer.invoke(
-        'lorra.session.respondApproval',
-        args,
-      )) as SerializedResult<true>;
-      return toView(fromSerialized(raw));
-    },
+    }) => invoke<true>('lorra.session.respondApproval', args),
   },
   providers: {
-    catalog: async () => {
-      const raw = (await ipcRenderer.invoke('lorra.providers.catalog')) as SerializedResult<
-        ProviderDto[]
-      >;
-      return toView(fromSerialized(raw));
-    },
-    list: async () => {
-      const raw = (await ipcRenderer.invoke('lorra.providers.list')) as SerializedResult<
-        ConnectedProviderDto[]
-      >;
-      return toView(fromSerialized(raw));
-    },
-    connect: async (args: { providerId: string; material?: string }) => {
-      const raw = (await ipcRenderer.invoke('lorra.providers.connect', {
+    catalog: () => invoke<ProviderDto[]>('lorra.providers.catalog'),
+    list: () => invoke<ConnectedProviderDto[]>('lorra.providers.list'),
+    connect: (args: { providerId: string; material?: string }) =>
+      invoke<void>('lorra.providers.connect', {
         providerId: args.providerId,
         material: args.material,
-      })) as SerializedResult<void>;
-      return toView(fromSerialized(raw));
-    },
-    disconnect: async (args: { providerId: string }) => {
-      const raw = (await ipcRenderer.invoke(
-        'lorra.providers.disconnect',
-        args,
-      )) as SerializedResult<void>;
-      return toView(fromSerialized(raw));
-    },
-    getAuthStatus: async (args: { providerId: string }) => {
-      const raw = (await ipcRenderer.invoke(
-        'lorra.providers.getAuthStatus',
-        args,
-      )) as SerializedResult<{
+      }),
+    disconnect: (args: { providerId: string }) => invoke<void>('lorra.providers.disconnect', args),
+    getAuthStatus: (args: { providerId: string }) =>
+      invoke<{
         configured: boolean;
         source?:
           | 'stored'
@@ -176,143 +139,58 @@ const lorra = {
           | 'models_json_key'
           | 'models_json_command';
         label?: string;
-      }>;
-      return toView(fromSerialized(raw));
-    },
-    testConnection: async (args: { providerId: string }) => {
-      const raw = (await ipcRenderer.invoke(
-        'lorra.providers.testConnection',
-        args,
-      )) as SerializedResult<void>;
-      return toView(fromSerialized(raw));
-    },
+      }>('lorra.providers.getAuthStatus', args),
+    testConnection: (args: { providerId: string }) =>
+      invoke<void>('lorra.providers.testConnection', args),
     custom: {
-      add: async (input: CustomProviderInput) => {
-        const raw = (await ipcRenderer.invoke(
-          'lorra.providers.custom.add',
-          input,
-        )) as SerializedResult<void>;
-        return toView(fromSerialized(raw));
-      },
-      remove: async (args: { providerId: string }) => {
-        const raw = (await ipcRenderer.invoke(
-          'lorra.providers.custom.remove',
-          args,
-        )) as SerializedResult<void>;
-        return toView(fromSerialized(raw));
-      },
+      add: (input: CustomProviderInput) => invoke<void>('lorra.providers.custom.add', input),
+      remove: (args: { providerId: string }) => invoke<void>('lorra.providers.custom.remove', args),
     },
   },
   models: {
-    list: async (args: { providerId?: string }) => {
-      const raw = (await ipcRenderer.invoke('lorra.models.list', args)) as SerializedResult<
-        ModelDto[]
-      >;
-      return toView(fromSerialized(raw));
-    },
-    getDefault: async () => {
-      const raw = (await ipcRenderer.invoke('lorra.models.getDefault')) as SerializedResult<{
-        providerId: string;
-        modelId: string;
-      } | null>;
-      return toView(fromSerialized(raw));
-    },
-    setDefault: async (args: { providerId: string; modelId: string }) => {
-      const raw = (await ipcRenderer.invoke(
-        'lorra.models.setDefault',
-        args,
-      )) as SerializedResult<void>;
-      return toView(fromSerialized(raw));
-    },
-    toggle: async (args: { providerId: string; modelId: string; enabled: boolean }) => {
-      const raw = (await ipcRenderer.invoke('lorra.models.toggle', args)) as SerializedResult<void>;
-      return toView(fromSerialized(raw));
-    },
-    getAvailable: async () => {
-      const raw = (await ipcRenderer.invoke('lorra.models.getAvailable')) as SerializedResult<
-        ModelDto[]
-      >;
-      return toView(fromSerialized(raw));
-    },
+    list: (args: { providerId?: string }) => invoke<ModelDto[]>('lorra.models.list', args),
+    getDefault: () =>
+      invoke<{ providerId: string; modelId: string } | null>('lorra.models.getDefault'),
+    setDefault: (args: { providerId: string; modelId: string }) =>
+      invoke<void>('lorra.models.setDefault', args),
+    toggle: (args: { providerId: string; modelId: string; enabled: boolean }) =>
+      invoke<void>('lorra.models.toggle', args),
+    getAvailable: () => invoke<ModelDto[]>('lorra.models.getAvailable'),
   },
   fs: {
-    tree: async (args: { directoryId: string; depth?: number }) => {
-      const raw = (await ipcRenderer.invoke('lorra.fs.tree', args)) as SerializedResult<
-        Array<{ id: string; name: string; type: 'file' | 'dir'; hasChildren: boolean }>
-      >;
-      return toView(fromSerialized(raw));
-    },
-    search: async (args: { query: string; limit?: number }) => {
-      const raw = (await ipcRenderer.invoke('lorra.fs.search', args)) as SerializedResult<
-        Array<{ fileId: string; name: string }>
-      >;
-      return toView(fromSerialized(raw));
-    },
-    open: async (args: { fileId: string }) => {
-      const raw = (await ipcRenderer.invoke('lorra.fs.open', args)) as SerializedResult<{
-        content: string;
-        mtime: number;
-        size: number;
-      }>;
-      return toView(fromSerialized(raw));
-    },
-    save: async (args: { fileId: string; content: string; baseMtime?: number }) => {
-      const raw = (await ipcRenderer.invoke('lorra.fs.save', args)) as SerializedResult<{
-        mtime: number;
-      }>;
-      return toView(fromSerialized(raw));
-    },
-    openBinary: async (args: { fileId: string }) => {
-      const raw = (await ipcRenderer.invoke('lorra.fs.openBinary', args)) as SerializedResult<{
-        data: Uint8Array;
-      }>;
-      return toView(fromSerialized(raw));
-    },
+    tree: (args: { directoryId: string; depth?: number }) =>
+      invoke<Array<{ id: string; name: string; type: 'file' | 'dir'; hasChildren: boolean }>>(
+        'lorra.fs.tree',
+        args,
+      ),
+    search: (args: { query: string; limit?: number }) =>
+      invoke<Array<{ fileId: string; name: string }>>('lorra.fs.search', args),
+    resolveWikilink: (args: { name: string }) =>
+      invoke<{ fileId: string | null }>('lorra.fs.resolve-wikilink', args),
+    open: (args: { fileId: string }) =>
+      invoke<{ content: string; mtime: number; size: number }>('lorra.fs.open', args),
+    save: (args: { fileId: string; content: string; baseMtime?: number }) =>
+      invoke<{ mtime: number }>('lorra.fs.save', args),
+    openBinary: (args: { fileId: string }) =>
+      invoke<{ data: Uint8Array }>('lorra.fs.openBinary', args),
+    // 拖拽文件 → 磁盘绝对路径(2026-08-14):Electron 43 已移除 File.path 增强,
+    // 官方替代为 webUtils.getPathForFile(renderer 侧 contextBridge 直传 File)。
+    getPathForFile: (file: File) => webUtils.getPathForFile(file),
     // 素材消化(3b 6.13):系统文件对话框选素材文件,取消返回 null。
-    pickFile: async () => {
-      const raw = (await ipcRenderer.invoke('lorra.fs.pick-file')) as SerializedResult<
-        string | null
-      >;
-      return toView(fromSerialized(raw));
-    },
+    pickFile: () => invoke<string | null>('lorra.fs.pick-file'),
   },
   annotations: {
-    list: async (args: { fileId: string }) => {
-      const raw = (await ipcRenderer.invoke('lorra.annotations.list', args)) as SerializedResult<
-        Annotation[]
-      >;
-      return toView(fromSerialized(raw));
-    },
-    save: async (args: { fileId: string; annotation: AnnotationDraft }) => {
-      const raw = (await ipcRenderer.invoke(
-        'lorra.annotations.save',
-        args,
-      )) as SerializedResult<void>;
-      return toView(fromSerialized(raw));
-    },
-    remove: async (args: { fileId: string; id: string }) => {
-      const raw = (await ipcRenderer.invoke(
-        'lorra.annotations.remove',
-        args,
-      )) as SerializedResult<void>;
-      return toView(fromSerialized(raw));
-    },
+    list: (args: { fileId: string }) => invoke<Annotation[]>('lorra.annotations.list', args),
+    save: (args: { fileId: string; annotation: AnnotationDraft }) =>
+      invoke<void>('lorra.annotations.save', args),
+    remove: (args: { fileId: string; id: string }) =>
+      invoke<void>('lorra.annotations.remove', args),
   },
   edits: {
-    revert: async (args: { editId: string }) => {
-      const raw = (await ipcRenderer.invoke('lorra.edits.revert', args)) as SerializedResult<{
-        fileId: string;
-      }>;
-      return toView(fromSerialized(raw));
-    },
-    accept: async (args: { editId: string }) => {
-      const raw = (await ipcRenderer.invoke('lorra.edits.accept', args)) as SerializedResult<{
-        fileId: string;
-      }>;
-      return toView(fromSerialized(raw));
-    },
-    list: async (args: { sessionId?: string }) => {
-      const raw = (await ipcRenderer.invoke('lorra.edits.list', args)) as SerializedResult<
+    revert: (args: { editId: string }) => invoke<{ fileId: string }>('lorra.edits.revert', args),
+    accept: (args: { editId: string }) => invoke<{ fileId: string }>('lorra.edits.accept', args),
+    list: (args: { sessionId?: string }) =>
+      invoke<
         Array<{
           id: string;
           sessionId: string;
@@ -322,9 +200,7 @@ const lorra = {
           status: 'applied' | 'accepted' | 'reverted';
           kind: 'git' | 'snapshot';
         }>
-      >;
-      return toView(fromSerialized(raw));
-    },
+      >('lorra.edits.list', args),
   },
   events: {
     subscribe: (cb: (event: unknown) => void) => {
@@ -336,13 +212,8 @@ const lorra = {
     },
   },
   today: {
-    // 今日页只读投影:直接透传主进程 SerializedResult 信封(契约钉死,
-    // 与其余 toView 方法不同),渲染端按 status 判别消费。
-    getDayFacts: async (dateISO?: string) => {
-      return (await ipcRenderer.invoke('lorra.today.getDayFacts', {
-        dateISO,
-      })) as SerializedResult<TodayDayData>;
-    },
+    // 今日页只读投影:直接透传主进程 SerializedResult 信封,渲染端按 ok 判别消费。
+    getDayFacts: (dateISO?: string) => invoke<TodayDayData>('lorra.today.getDayFacts', { dateISO }),
     // S6:后台编译完成推送(今日页打开时数据过期 → 编译完成自动刷新);
     // 返回退订函数(removeListener)。
     onDayCompiled: (cb: () => void) => {
@@ -354,61 +225,33 @@ const lorra = {
     },
   },
   review: {
-    generate: async (args: GenerateArgs) => {
-      const raw = (await ipcRenderer.invoke(
-        REVIEW_CHANNEL_GENERATE,
-        args,
-      )) as SerializedResult<ReviewMeta>;
-      return toView(fromSerialized(raw));
-    },
-    list: async () => {
-      const raw = (await ipcRenderer.invoke(REVIEW_CHANNEL_LIST)) as SerializedResult<ReviewMeta[]>;
-      return toView(fromSerialized(raw));
-    },
-    read: async (args: ReadArgs) => {
-      const raw = (await ipcRenderer.invoke(
-        REVIEW_CHANNEL_READ,
-        args,
-      )) as SerializedResult<StoredReview>;
-      return toView(fromSerialized(raw));
-    },
+    generate: (args: GenerateArgs) => invoke<ReviewMeta>(REVIEW_CHANNEL_GENERATE, args),
+    list: () => invoke<ReviewMeta[]>(REVIEW_CHANNEL_LIST),
+    read: (args: ReadArgs) => invoke<StoredReview>(REVIEW_CHANNEL_READ, args),
   },
   skills: {
     // 技能管理页(V1-9 + 2026-08-13 批):通道名取 shared/skills-api 单一事实源;
-    // 与 today 同款直接透传主进程 SerializedResult 信封,渲染端按 status 判别消费。
-    xray: async () => (await ipcRenderer.invoke(SKILLS_IPC.xray)) as SerializedResult<SkillXray>,
-    setEnabled: async (name: string, enabled: boolean) =>
-      (await ipcRenderer.invoke(SKILLS_IPC.setEnabled, {
-        name,
-        enabled,
-      })) as SerializedResult<void>,
-    cleanDangling: async (wsPath: string) =>
-      (await ipcRenderer.invoke(SKILLS_IPC.cleanDangling, {
-        wsPath,
-      })) as SerializedResult<{ cleaned: number }>,
-    collect: async (wsPath?: string) =>
-      (await ipcRenderer.invoke(SKILLS_IPC.collect, {
-        wsPath,
-      })) as SerializedResult<CollectResult>,
-    checkUpdates: async () =>
-      (await ipcRenderer.invoke(SKILLS_IPC.checkUpdates)) as SerializedResult<
-        Record<string, SkillGitStatus>
-      >,
-    updateAll: async () =>
-      (await ipcRenderer.invoke(SKILLS_IPC.updateAll)) as SerializedResult<{
-        updated: string[];
-        skipped: string[];
-      }>,
-    setWsEnabled: async (name: string, enabled: boolean, wsPath?: string) =>
-      (await ipcRenderer.invoke(SKILLS_IPC.setWsEnabled, {
-        name,
-        enabled,
-        wsPath,
-      })) as SerializedResult<void>,
+    // 与 today 同款直接透传主进程 SerializedResult 信封,渲染端按 ok 判别消费。
+    xray: () => invoke<SkillXray>(SKILLS_IPC.xray),
+    setEnabled: (name: string, enabled: boolean) =>
+      invoke<void>(SKILLS_IPC.setEnabled, { name, enabled }),
+    cleanDangling: (wsPath: string) =>
+      invoke<{ cleaned: number }>(SKILLS_IPC.cleanDangling, { wsPath }),
+    collect: (wsPath?: string) => invoke<CollectResult>(SKILLS_IPC.collect, { wsPath }),
+    checkUpdates: () => invoke<Record<string, SkillGitStatus>>(SKILLS_IPC.checkUpdates),
+    updateAll: () => invoke<{ updated: string[]; skipped: string[] }>(SKILLS_IPC.updateAll),
+    setWsEnabled: (name: string, enabled: boolean, wsPath?: string) =>
+      invoke<void>(SKILLS_IPC.setWsEnabled, { name, enabled, wsPath }),
+    // /skill 触发(2026-08-14):读取技能文件原文,composer 拼 prompt 后走正常发送。
+    read: (name: string) => invoke<SkillReadResult>(SKILLS_IPC.read, { name }),
+  },
+  clipboard: {
+    // 输入栏粘贴图片(2026-08-14):主进程读系统剪贴板 → 存工作区 → 返回预览 dataUrl。
+    saveImage: () => invoke<SavedClipboardImage>('lorra.clipboard.saveImage'),
   },
   settings: {
-    get: async () => {
-      const raw = (await ipcRenderer.invoke('lorra.settings.get')) as SerializedResult<{
+    get: () =>
+      invoke<{
         showHiddenFiles: boolean;
         language: Lang;
         defaultHideThinking: boolean;
@@ -419,10 +262,9 @@ const lorra = {
           ohMyPi: boolean;
           workbuddy: boolean;
         };
-      }>;
-      return toView(fromSerialized(raw));
-    },
-    set: async (args: {
+        tags: string[];
+      }>('lorra.settings.get'),
+    set: (args: {
       showHiddenFiles?: boolean;
       language?: Lang;
       defaultHideThinking?: boolean;
@@ -433,91 +275,43 @@ const lorra = {
         ohMyPi?: boolean;
         workbuddy?: boolean;
       };
-    }) => {
-      const raw = (await ipcRenderer.invoke('lorra.settings.set', args)) as SerializedResult<void>;
-      return toView(fromSerialized(raw));
-    },
+      tags?: string[];
+    }) => invoke<void>('lorra.settings.set', args),
   },
   memory: {
     // 记忆页全栈 bridge(phase3-contract 6.9 / ):通道名/参数形状取
-    // shared/memory-api 单一事实源;invoke 包装 + SerializedResult →
-    // LorraResult(toView,与其余 bridge 同构)。无 confirm/reject 通道
-    // (闸门拆除);edit = update 语义,listEvents = 审计视图数据源。
-    listActive: async (args: ListActiveArgs) => {
-      const raw = (await ipcRenderer.invoke(MEMORY_CHANNEL_LIST_ACTIVE, args)) as SerializedResult<
-        MemoryEntry[]
-      >;
-      return toView(fromSerialized(raw));
-    },
-    listArchived: async () => {
-      const raw = (await ipcRenderer.invoke(MEMORY_CHANNEL_LIST_ARCHIVED)) as SerializedResult<
-        MemoryEntry[]
-      >;
-      return toView(fromSerialized(raw));
-    },
-    listEvents: async (args: ListEventsArgs) => {
-      const raw = (await ipcRenderer.invoke(MEMORY_CHANNEL_LIST_EVENTS, args)) as SerializedResult<
-        MemoryEvent[]
-      >;
-      return toView(fromSerialized(raw));
-    },
-    listLinks: async () => {
-      const raw = (await ipcRenderer.invoke(MEMORY_CHANNEL_LIST_LINKS)) as SerializedResult<
-        MemoryLink[]
-      >;
-      return toView(fromSerialized(raw));
-    },
-    edit: async (args: EditArgs) => {
-      const raw = (await ipcRenderer.invoke(
-        MEMORY_CHANNEL_EDIT,
-        args,
-      )) as SerializedResult<MemoryEntry>;
-      return toView(fromSerialized(raw));
-    },
-    retire: async (args: RetireArgs) => {
-      const raw = (await ipcRenderer.invoke(
-        MEMORY_CHANNEL_RETIRE,
-        args,
-      )) as SerializedResult<MemoryEntry>;
-      return toView(fromSerialized(raw));
-    },
-    search: async (args: SearchArgs) => {
-      const raw = (await ipcRenderer.invoke(MEMORY_CHANNEL_SEARCH, args)) as SerializedResult<
-        MemoryEntry[]
-      >;
-      return toView(fromSerialized(raw));
-    },
+    // shared/memory-api 单一事实源;invoke 包装后直传 SerializedResult 信封。
+    // 无 confirm/reject 通道(闸门拆除);edit = update 语义,listEvents = 审计视图数据源。
+    listActive: (args: ListActiveArgs) => invoke<MemoryEntry[]>(MEMORY_CHANNEL_LIST_ACTIVE, args),
+    listArchived: () => invoke<MemoryEntry[]>(MEMORY_CHANNEL_LIST_ARCHIVED),
+    listEvents: (args: ListEventsArgs) => invoke<MemoryEvent[]>(MEMORY_CHANNEL_LIST_EVENTS, args),
+    listLinks: () => invoke<MemoryLink[]>(MEMORY_CHANNEL_LIST_LINKS),
+    edit: (args: EditArgs) => invoke<MemoryEntry>(MEMORY_CHANNEL_EDIT, args),
+    retire: (args: RetireArgs) => invoke<MemoryEntry>(MEMORY_CHANNEL_RETIRE, args),
+    search: (args: SearchArgs) => invoke<MemoryEntry[]>(MEMORY_CHANNEL_SEARCH, args),
     // 6.13 素材消化 + 用户结晶(「记住这段」):原文不落库,产物直落 active。
-    digestText: async (args: DigestTextArgs) => {
-      const raw = (await ipcRenderer.invoke(MEMORY_CHANNEL_DIGEST_TEXT, args)) as SerializedResult<{
-        entryId: string;
-      }>;
-      return toView(fromSerialized(raw));
-    },
-    digestFile: async (args: DigestFileArgs) => {
-      const raw = (await ipcRenderer.invoke(MEMORY_CHANNEL_DIGEST_FILE, args)) as SerializedResult<{
-        entryId: string;
-      }>;
-      return toView(fromSerialized(raw));
-    },
-    crystallize: async (args: CrystallizeArgs) => {
-      const raw = (await ipcRenderer.invoke(MEMORY_CHANNEL_CRYSTALLIZE, args)) as SerializedResult<{
-        entryId: string;
-      }>;
-      return toView(fromSerialized(raw));
-    },
+    digestText: (args: DigestTextArgs) =>
+      invoke<{ entryId: string }>(MEMORY_CHANNEL_DIGEST_TEXT, args),
+    digestFile: (args: DigestFileArgs) =>
+      invoke<{ entryId: string }>(MEMORY_CHANNEL_DIGEST_FILE, args),
+    crystallize: (args: CrystallizeArgs) =>
+      invoke<{ entryId: string }>(MEMORY_CHANNEL_CRYSTALLIZE, args),
     // :知识库文档读取(记忆页「查看文档」跳转 OFK memory/<entryId>.md)。
-    readDocument: async (path: string) => {
-      const raw = (await ipcRenderer.invoke(KNOWLEDGE_CHANNEL_READ, { path })) as SerializedResult<{
-        content: string | null;
-      }>;
-      return toView(fromSerialized(raw));
-    },
+    readDocument: (path: string) =>
+      invoke<{ content: string | null }>(KNOWLEDGE_CHANNEL_READ, { path }),
+    getCoreProjection: () => invoke<CoreProjectionDto>(MEMORY_CHANNEL_GET_CORE_PROJECTION),
+    getWorkingMemory: (sessionId: string) =>
+      invoke<WorkingMemorySnapshotDto | null>(MEMORY_CHANNEL_GET_WORKING_MEMORY, { sessionId }),
+    getArchivalAudit: (sessionId: string) =>
+      invoke<ArchivalAuditDto | null>(MEMORY_CHANNEL_GET_ARCHIVAL_AUDIT, { sessionId }),
+    getExperienceAudit: (nameOrId: string) =>
+      invoke<ExperienceAuditDto | null>(MEMORY_CHANNEL_GET_EXPERIENCE_AUDIT, { nameOrId }),
+    okfCheck: (path: string) => invoke<OkfCheckResultDto>(MEMORY_CHANNEL_OKF_CHECK, { path }),
   },
   plugins: {
     // 数据源插件清单:设置页只读展示;每次调用现加载。
-    list: async () => {
-      const raw = (await ipcRenderer.invoke('lorra.plugins.list')) as SerializedResult<{
+    list: () =>
+      invoke<{
         plugins: Array<{
           name: string;
           runtime: string;
@@ -525,9 +319,31 @@ const lorra = {
           status: 'ok' | 'error';
           error?: string;
         }>;
-      }>;
-      return toView(fromSerialized(raw));
-    },
+      }>('lorra.plugins.list'),
+  },
+  agentPlugins: {
+    // agent-plugins 管理（plan S2/S4）：插件态/MCP 态数据 + 启停/增删；
+    // 与 skills 同款直接透传 SerializedResult 信封，渲染端按 ok 判别消费。
+    xray: (wsPath?: string) => invoke<PluginsXray>('lorra.plugins.xray', { wsPath }),
+    setPluginEnabled: (name: string, enabled: boolean) =>
+      invoke<void>('lorra.plugins.setPluginEnabled', { name, enabled }),
+    mcpAdd: (id: string, config: McpServerConfig) =>
+      invoke<void>('lorra.plugins.mcpAdd', { id, config }),
+    mcpRemove: (id: string) => invoke<void>('lorra.plugins.mcpRemove', { id }),
+    mcpSetEnabled: (id: string, enabled: boolean) =>
+      invoke<void>('lorra.plugins.mcpSetEnabled', { id, enabled }),
+    mcpTest: (id: string) =>
+      invoke<{ id: string; ok: boolean; toolCount?: number; error?: string }>(
+        'lorra.plugins.mcpTest',
+        { id },
+      ),
+    importFolder: (source: string) =>
+      invoke<{ name: string; path: string; skillCount: number; mcpCount: number }>(
+        'lorra.plugins.importFolder',
+        { source },
+      ),
+    create: (name: string) =>
+      invoke<{ name: string; path: string }>('lorra.plugins.create', { name }),
   },
 };
 

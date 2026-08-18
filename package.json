@@ -5,6 +5,7 @@
   "license": "MIT",
   "type": "module",
   "description": "Personal deep-work desktop workspace",
+  "author": "lorra",
   "main": ".vite/build/main.js",
   "scripts": {
     "start": "electron-forge start",
@@ -28,7 +29,6 @@
     "@radix-ui/react-scroll-area": "^1.2.18",
     "@radix-ui/react-separator": "^1.1.15",
     "@radix-ui/react-tooltip": "^1.2.16",
-    "@vitejs/plugin-react": "latest",
     "better-result": "^3.0.0",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
@@ -65,6 +65,7 @@
     "@types/node": "latest",
     "@types/react": "latest",
     "@types/react-dom": "latest",
+    "@vitejs/plugin-react": "latest",
     "@vitest/coverage-v8": "^4.1.10",
     "autoprefixer": "^10.5.4",
     "electron": "latest",

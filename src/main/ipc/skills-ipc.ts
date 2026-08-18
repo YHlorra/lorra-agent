@@ -6,6 +6,7 @@ import {
   type CollectResult,
   SKILLS_IPC,
   type SkillGitStatus,
+  type SkillReadResult,
   type SkillXray,
 } from '../../shared/skills-api';
 import {
@@ -13,6 +14,7 @@ import {
   cleanDangling,
   collectSkills,
   getSkillXray,
+  readSkillContent,
   resolveWorkspacePath,
   setSkillEnabled,
   setWorkspaceEnabled,
@@ -21,9 +23,9 @@ import {
 import { readSettings } from '../workspace/settings';
 
 /**
- * 技能管理 IPC（V1-8 + 2026-08-13 批 D9）：
+ * 技能管理 IPC（V1-8 + 2026-08-13 批 D9 + 2026-08-14 /skill 触发）：
  * xray / setEnabled / cleanDangling / collect / checkUpdates / updateAll /
- * setWsEnabled 七通道,通道名取 SKILLS_IPC 单一事实源(install 已迁移为
+ * setWsEnabled / read 八通道,通道名取 SKILLS_IPC 单一事实源(install 已迁移为
  * 会话内 install_skill 智能体工具,不再有前端安装通道)。
  *
  * - 信封:全部 SerializedResult({status:'ok',value} / {status:'error',error}),
@@ -122,6 +124,16 @@ export function registerSkillsIpc(): void {
         return toSerialized(err({ code: 'unknown-workspace', message: '未知工作区' }));
       }
       return toSerialized(await cleanDangling(wsRes.value));
+    },
+  );
+
+  ipcMain.handle(
+    SKILLS_IPC.read,
+    async (_event, args?: { name?: unknown }): Promise<SerializedResult<SkillReadResult>> => {
+      if (typeof args?.name !== 'string' || args.name.trim() === '') {
+        return toSerialized(err({ code: 'invalid-skill-name', message: '技能名称无效' }));
+      }
+      return toSerialized(await readSkillContent(args.name.trim()));
     },
   );
 }

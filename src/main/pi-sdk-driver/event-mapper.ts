@@ -53,26 +53,10 @@ export class EventMapper {
 
   constructor(private readonly deps: MapperDeps) {}
 
-  private freshEnvelope() {
-    return {
-      sessionId: this.deps.sessionId,
-      eventId: crypto.randomUUID(),
-      seq: this.deps.nextSeq(),
-      ts: Date.now(),
-    };
-  }
-
   map(event: AgentSessionEvent): AgentEvent | null {
     // M3 (Oracle ): let nextSeq throw — uncaught-handler logs. Do NOT
     // swallow the error here; that would violate .
-    const seq = this.deps.nextSeq();
-
-    const envelope = {
-      sessionId: this.deps.sessionId,
-      eventId: crypto.randomUUID(),
-      seq,
-      ts: Date.now(),
-    };
+    const env = envelope(this.deps);
 
     switch (event.type) {
       case 'message_start':
@@ -96,7 +80,7 @@ export class EventMapper {
         // The thinking event takes the already-allocated `envelope` seq and is
         // emitted first via deps.emit; the returned message event then takes a
         // fresh seq so per-session seq stays monotonic in emission order.
-        let msgEnvelope = envelope;
+        let msgEnvelope = env;
         if (role === 'assistant') {
           const segments = this.deps.toMessageThinkingSegments(msg);
           if (segments && segments.length > 0) {
@@ -105,7 +89,7 @@ export class EventMapper {
               segments.forEach((seg, i) => {
                 if (!seg.thinking && !seg.redacted) return;
                 this.deps.emit?.({
-                  ...envelope,
+                  ...env,
                   type: 'thinking.final',
                   role: 'assistant',
                   messageId,
@@ -115,7 +99,7 @@ export class EventMapper {
                   ...(seg.redacted ? { thinkingRedacted: true } : {}),
                 });
               });
-              msgEnvelope = this.freshEnvelope();
+              msgEnvelope = envelope(this.deps);
             } else {
               // 流式:每段独立比较文本增长,逐段发射 partial(块边界保留)。
               segments.forEach((seg, i) => {
@@ -123,7 +107,7 @@ export class EventMapper {
                 if (seg.thinking && seg.thinking !== prev) {
                   this.lastSegmentTexts.set(i, seg.thinking);
                   this.deps.emit?.({
-                    ...envelope,
+                    ...env,
                     type: 'thinking.partial',
                     role: 'assistant',
                     messageId,
@@ -133,7 +117,7 @@ export class EventMapper {
                   });
                 }
               });
-              msgEnvelope = this.freshEnvelope();
+              msgEnvelope = envelope(this.deps);
             }
           }
         }
@@ -157,7 +141,7 @@ export class EventMapper {
         const target = this.deps.toToolTarget(event.toolName, event.args);
         this.toolArgsByCall.set(event.toolCallId, event.args);
         return {
-          ...envelope,
+          ...env,
           type: 'tool.start',
           toolName: event.toolName,
           target,
@@ -169,7 +153,7 @@ export class EventMapper {
       case 'tool_execution_update': {
         const target = this.deps.toToolTarget(event.toolName, event.args);
         return {
-          ...envelope,
+          ...env,
           type: 'tool.update',
           toolName: event.toolName,
           target,
@@ -198,7 +182,7 @@ export class EventMapper {
         if (event.isError && BLOCKED_SAFETY_PREFIXES.some((p) => result.startsWith(p))) {
           if (this.deps.onToolEnd) this.deps.onToolEnd(event.toolName, target);
           return {
-            ...envelope,
+            ...env,
             type: 'tool.blocked',
             toolName: event.toolName,
             target,
@@ -211,7 +195,7 @@ export class EventMapper {
           this.deps.onToolEnd(event.toolName, target);
         }
         return {
-          ...envelope,
+          ...env,
           type: 'tool.end',
           toolName: event.toolName,
           target,
@@ -223,13 +207,13 @@ export class EventMapper {
 
       case 'turn_start':
       case 'agent_start': {
-        return { ...envelope, type: 'session.status', status: 'streaming' };
+        return { ...env, type: 'session.status', status: 'streaming' };
       }
 
       case 'turn_end':
       case 'agent_end':
       case 'agent_settled': {
-        return { ...envelope, type: 'session.status', status: 'idle' };
+        return { ...env, type: 'session.status', status: 'idle' };
       }
 
       default:
@@ -535,17 +519,5 @@ function extractToolResultText(result: unknown): string {
   const record = result as { content?: unknown; details?: { diff?: unknown } };
   const diff = record.details?.diff;
   if (typeof diff === 'string' && diff.length > 0) return diff;
-  const content = record.content;
-  if (typeof content === 'string') return content;
-  if (Array.isArray(content)) {
-    return content
-      .map((c) => {
-        const block = c as { type?: string; text?: unknown };
-        if (block.type === 'text' && typeof block.text === 'string') return block.text;
-        return '';
-      })
-      .filter(Boolean)
-      .join('\n');
-  }
-  return '';
+  return extractText(record.content);
 }

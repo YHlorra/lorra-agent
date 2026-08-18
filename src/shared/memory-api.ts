@@ -20,9 +20,6 @@ export interface ListActiveArgs {
   kind?: MemoryKind;
 }
 
-/** 归档只读：retired + superseded。 */
-export type ListArchivedArgs = void;
-
 /** 审计视图：entryId 缺省返回全部事件（ts 倒序）。 */
 export interface ListEventsArgs {
   entryId?: string;
@@ -32,7 +29,6 @@ export interface ListEventsArgs {
  * 图谱数据出口：entry_links 全量边列表（展示阶段消费——
  * 网络图/关系面板数据源）。无参数、无排序保证。
  */
-export type ListLinksArgs = void;
 export interface MemoryLink {
   fromId: string;
   toId: string;
@@ -105,6 +101,76 @@ export interface CrystallizeArgs {
   title?: string;
 }
 
+export interface CoreProjectionDto {
+  text: string;
+  workspaceIdentity: string;
+  entryIds: string[];
+}
+
+export interface WorkingMemorySnapshotDto {
+  goal?: string;
+  constraints: string[];
+  openLoops: string[];
+  recentCorrections: string[];
+  recentDecisions: string[];
+  pendingFacts: string[];
+  updatedAt: number;
+  lastCompactedAt?: number;
+}
+
+export type ArchivalTrigger =
+  | 'session-start'
+  | 'history'
+  | 'preference'
+  | 'workspace'
+  | 'correction'
+  | 'resume';
+
+export interface ArchivalAuditDto {
+  reason: string;
+  triggeredBy: ArchivalTrigger;
+  sources: Array<'memory' | 'ofk'>;
+  query?: string;
+  memoryEntryIds: string[];
+  ofkPaths: string[];
+  text: string;
+  updatedAt: number;
+}
+
+export interface ExperienceCaseDto {
+  caseId: string;
+  title: string;
+  problem: string;
+  solution: string;
+  constraints: string[];
+  sourceEntryIds: string[];
+  workspace: string;
+  updatedAt: number;
+}
+
+export interface ExperienceAuditDto {
+  skillName: string;
+  generated: boolean;
+  filePath: string | null;
+  caseIds: string[];
+  entryIds: string[];
+  warnings: string[];
+}
+
+export interface OkfIssueDto {
+  level: 'info' | 'warn';
+  code: string;
+  message: string;
+}
+
+export interface OkfCheckResultDto {
+  path: string;
+  type: string | null;
+  generated: boolean;
+  verified: boolean;
+  issues: OkfIssueDto[];
+}
+
 // ---- 通道名 ----
 
 export const MEMORY_CHANNEL_LIST_ACTIVE = 'lorra.memory.list-active';
@@ -118,3 +184,8 @@ export const MEMORY_CHANNEL_DIGEST_TEXT = 'lorra.memory.digest-text';
 export const MEMORY_CHANNEL_DIGEST_FILE = 'lorra.memory.digest-file';
 export const MEMORY_CHANNEL_CRYSTALLIZE = 'lorra.memory.crystallize';
 export const KNOWLEDGE_CHANNEL_READ = 'lorra.knowledge.read';
+export const MEMORY_CHANNEL_GET_CORE_PROJECTION = 'lorra.memory.get-core-projection';
+export const MEMORY_CHANNEL_GET_WORKING_MEMORY = 'lorra.memory.get-working-memory';
+export const MEMORY_CHANNEL_GET_ARCHIVAL_AUDIT = 'lorra.memory.get-archival-audit';
+export const MEMORY_CHANNEL_GET_EXPERIENCE_AUDIT = 'lorra.memory.get-experience-audit';
+export const MEMORY_CHANNEL_OKF_CHECK = 'lorra.memory.okf-check';

@@ -3,7 +3,10 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { createPiSdkCollector } from '../../src/main/memory/collectors/pi-sdk-collector';
+import {
+  createPiSdkCollector,
+  parseSessionJsonl,
+} from '../../src/main/memory/collectors/pi-sdk-collector';
 import {
   FACTS_SCHEMA_VERSION,
   type FactPrivacy,
@@ -221,5 +224,73 @@ describe('pi-sdk collector', () => {
     } finally {
       rmSync(growing, { recursive: true, force: true });
     }
+  });
+});
+
+// model_change 形状归一(2026-08-14):collector 层把新形状(model 单字段)与
+// 旧形状(provider+modelId)统一为 { model: 'provider/modelId' }。
+describe('parseSessionJsonl model_change 形状', () => {
+  it('新形状 model 单字段 → modelChange.model 原样', () => {
+    const jsonl = [
+      JSON.stringify({
+        type: 'session',
+        id: 's1',
+        cwd: 'C:\\work',
+        timestamp: '2026-08-14T00:00:00.000Z',
+      }),
+      JSON.stringify({
+        type: 'model_change',
+        id: 'mc1',
+        parentId: null,
+        timestamp: '2026-08-14T00:00:01.000Z',
+        model: 'opencode-go/deepseek-v4-flash',
+        resolvedModelIsFallback: false,
+      }),
+    ].join('\n');
+    const parsed = parseSessionJsonl(jsonl);
+    expect(parsed.header?.id).toBe('s1');
+    expect(parsed.entries[0]?.modelChange).toEqual({ model: 'opencode-go/deepseek-v4-flash' });
+    expect(parsed.skippedLines).toEqual([]);
+  });
+
+  it('旧形状 provider+modelId → 归一为 provider/modelId 字符串', () => {
+    const jsonl = [
+      JSON.stringify({
+        type: 'session',
+        id: 's2',
+        cwd: 'C:\\work',
+        timestamp: '2026-08-14T00:00:00.000Z',
+      }),
+      JSON.stringify({
+        type: 'model_change',
+        id: 'mc1',
+        parentId: null,
+        timestamp: '2026-08-14T00:00:01.000Z',
+        provider: 'anthropic',
+        modelId: 'claude-sonnet-4-5',
+      }),
+    ].join('\n');
+    const parsed = parseSessionJsonl(jsonl);
+    expect(parsed.entries[0]?.modelChange).toEqual({ model: 'anthropic/claude-sonnet-4-5' });
+  });
+
+  it('model 非字符串(空/缺) → 无 modelChange(不误认)', () => {
+    const jsonl = [
+      JSON.stringify({
+        type: 'session',
+        id: 's3',
+        cwd: 'C:\\work',
+        timestamp: '2026-08-14T00:00:00.000Z',
+      }),
+      JSON.stringify({
+        type: 'model_change',
+        id: 'mc1',
+        parentId: null,
+        timestamp: '2026-08-14T00:00:01.000Z',
+        model: 42,
+      }),
+    ].join('\n');
+    const parsed = parseSessionJsonl(jsonl);
+    expect(parsed.entries[0]?.modelChange).toBeUndefined();
   });
 });

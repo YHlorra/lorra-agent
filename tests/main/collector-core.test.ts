@@ -25,8 +25,9 @@ vi.mock('node:fs', async (importOriginal) => {
     readFileSync: vi.fn(actual.readFileSync),
   };
 });
-import { readFileSync } from 'node:fs';
+
 import type * as NodeFs from 'node:fs';
+import { readFileSync } from 'node:fs';
 
 const SAMPLE = [
   { type: 'user', message: { role: 'user', content: 'Hi' }, timestamp: '2026-08-08T01:00:00.000Z' },
@@ -54,9 +55,7 @@ describe('collector-core jsonl 增量', () => {
 
     vi.mocked(readConcept).mockReset();
     vi.mocked(readConcept).mockResolvedValue(ok('concept-content'));
-    vi.mocked(sessionConceptPath).mockImplementation(
-      (fact) => `sessions/${fact.sessionRef}.md`,
-    );
+    vi.mocked(sessionConceptPath).mockImplementation((fact) => `sessions/${fact.sessionRef}.md`);
   });
 
   afterEach(() => {

@@ -11,10 +11,6 @@ export function setMainLanguage(lang: Lang): void {
   current = lang;
 }
 
-export function getMainLanguage(): Lang {
-  return current;
-}
-
 /** Main 进程用户可见文案翻译(仅 UI-facing message;prompt/toolText/日志不动)。 */
 export function tMain(key: MessageKey, params?: Record<string, string | number>): string {
   return translate(current, key, params);

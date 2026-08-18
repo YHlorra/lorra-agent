@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -133,7 +133,7 @@ describe('ofk-session-writer', () => {
     expect(doc.startsWith('---\ntype: Session\n')).toBe(true);
     expect(doc).toContain('title: Fix the flaky login test\n');
     expect(doc).toContain('description: Fix the flaky login test\n');
-    expect(doc).toContain('category: uncategorized\n');
+    expect(doc).toContain('category: 未分类\n');
     expect(doc).toContain(`workspace: ${CWD}\n`);
     expect(doc).toContain(`sessionRef: ${sessionId}\n`);
     expect(doc).toContain(`start: ${ts(5)}\n`);
@@ -164,7 +164,7 @@ describe('ofk-session-writer', () => {
     expect(parsed).not.toBeNull();
     if (!parsed) throw new Error('expected parsed concept');
     expect(parsed.title).toBe(fact.title);
-    expect(parsed.category).toBe('uncategorized');
+    expect(parsed.category).toBe('未分类');
     expect(parsed.workspace).toBe(CWD);
     expect(parsed.sessionRef).toBe(sessionId);
     expect(parsed.activeMs).toBe(65_000);
@@ -219,7 +219,7 @@ describe('ofk-session-writer', () => {
     expect(doc).not.toContain('## 用户要求'); // 插件源无正文三段
     expect(doc).not.toContain('resource:'); // 无 jsonl 源
 
-    const noTools = buildSessionConcept(fact, null, 'uncategorized');
+    const noTools = buildSessionConcept(fact, null, '未分类');
     expect(noTools).toContain('- 调用工具：无');
   });
 
@@ -229,7 +229,7 @@ describe('ofk-session-writer', () => {
       sessionRef: 'bad/ref:name',
       workspace: 'C:\\work\\demo',
     });
-    const doc = buildSessionConcept(fact, null, 'uncategorized', 'C:\\src\\s.jsonl');
+    const doc = buildSessionConcept(fact, null, '未分类', 'C:\\src\\s.jsonl');
     expect(doc).toContain('title: "带: 冒号的标题"'); // 含冒号+空格 → 引号
     expect(doc).toContain('sessionRef: bad/ref:name'); // 原值保留(路径清洗只发生在文件名)
     expect(doc).toContain('resource: C:\\src\\s.jsonl');
@@ -247,7 +247,7 @@ describe('ofk-session-writer', () => {
         message: { role: 'user', content: longText },
       },
     ];
-    const truncated = buildSessionConcept(fact, seq, 'uncategorized');
+    const truncated = buildSessionConcept(fact, seq, '未分类');
     expect(truncated).toContain(`- [09:05] ${'y'.repeat(500)}…`);
   });
 
@@ -356,5 +356,37 @@ describe('ofk-session-writer', () => {
     // 插件源(sequence=null)→ 无 breaks 行
     const pluginDoc = buildSessionConcept(fact, null, 'work');
     expect(pluginDoc).not.toContain('\nbreaks:');
+  });
+
+  it('buildSessionConcept: description 入参 → frontmatter 写归纳;缺省 = title 播种', () => {
+    const doc = buildSessionConcept(makeFact(), null, 'work', undefined, '修复登录测试');
+    expect(doc).toContain('description: 修复登录测试');
+    expect(doc).toContain('title: Fix the flaky login test');
+    const seeded = buildSessionConcept(makeFact(), null, 'work');
+    expect(seeded).toContain('description: Fix the flaky login test');
+  });
+
+  it('syncSessionFile: 重清洗保留编译写回的 description(归纳不被清洗覆盖)', async () => {
+    const sessionId = 'sess-desc-a';
+    const jsonlPath = path.join(sessionsDir, `2026-08-08T09-00-00-000Z_${sessionId}.jsonl`);
+    writeFileSync(jsonlPath, linearSessionJsonl(sessionId), 'utf8');
+    const first = await syncSessionFile(jsonlPath, 'ws');
+    expect(first.isOk()).toBe(true);
+    const rel = sessionConceptPath(first.unwrapOr(null as never));
+    const file = path.join(ofkBundleRoot(), rel);
+    // 模拟 P2 编译写回 description(LLM 整会话归纳)
+    const seeded = readFileSync(file, 'utf8');
+    expect(seeded).toContain('description: Fix the flaky login test');
+    writeFileSync(
+      file,
+      seeded.replace(/^description:.*$/m, 'description: 修复了不稳定的登录测试'),
+      'utf8',
+    );
+    // 重清洗 → description 保留、title 不变
+    const second = await syncSessionFile(jsonlPath, 'ws');
+    expect(second.isOk()).toBe(true);
+    const doc = readFileSync(file, 'utf8');
+    expect(doc).toContain('description: 修复了不稳定的登录测试');
+    expect(doc).toContain('title: Fix the flaky login test');
   });
 });

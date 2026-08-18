@@ -11,6 +11,7 @@ import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { app } from 'electron';
 import type { Lang } from '../../shared/i18n-core';
+import type { McpServerConfig } from '../../shared/plugins-api';
 
 export interface AppSettings {
   /** First entry is the active workspace (Section 3 / D6). */
@@ -34,6 +35,14 @@ export interface AppSettings {
   compileModel?: { providerId: string; modelId: string } | null;
   /** 数据源开关:内置适配器启用;缺省 = 全关(pi 恒开不在此列)。 */
   dataSources?: { claudeCode?: boolean; opencode?: boolean; ohMyPi?: boolean; workbuddy?: boolean };
+  /** 今日页标签列表(2026-08-14):内置默认 + 用户自定义;缺省 = DEFAULT_TAGS。 */
+  tags?: string[];
+  /** agent-plugins 根(空串 = 默认 ~/.lorra/plugins/agent-plugins;只影响后续安装/新 collection)。 */
+  agentPluginRoot?: string;
+  /** 停用的 agent-plugin 名名单(按名启停，映射其 skills + mcpServers)。 */
+  disabledPlugins?: string[];
+  /** 用户自配 MCP 服务器(key = 服务器 id)。 */
+  mcpServers?: Record<string, McpServerConfig>;
 }
 
 const EMPTY: AppSettings = {
@@ -44,6 +53,9 @@ const EMPTY: AppSettings = {
   skillCollectionRoot: '',
   workspaceSkillOverrides: {},
   dataSources: { claudeCode: false, opencode: false, ohMyPi: false, workbuddy: false },
+  agentPluginRoot: '',
+  disabledPlugins: [],
+  mcpServers: {},
 };
 
 /** dataSources 白名单解析:逐键 === true 才保留(其余键/值丢弃)。 */
@@ -67,6 +79,65 @@ function isCompileModel(value: unknown): value is { providerId: string; modelId:
     typeof record.modelId === 'string' &&
     record.modelId.length > 0
   );
+}
+
+/** tags 规范化:非空串、trim、去重、≤30;空数组 → undefined(回内置默认)。 */
+function normalizeTags(value: unknown): string[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const tags = [
+    ...new Set(
+      value
+        .filter((t): t is string => typeof t === 'string' && t.trim() !== '')
+        .map((t) => t.trim()),
+    ),
+  ].slice(0, 30);
+  return tags.length > 0 ? tags : undefined;
+}
+
+/** Record<string, McpServerConfig> 归一化:逐 id 保留 type 合法且 shape 完整的条目，非法丢弃。 */
+function parseMcpServers(value: unknown): Record<string, McpServerConfig> | undefined {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return undefined;
+  const out: Record<string, McpServerConfig> = {};
+  const TYPES = new Set(['stdio', 'streamable-http', 'sse']);
+  for (const [id, raw] of Object.entries(value as Record<string, unknown>)) {
+    if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) continue;
+    const cfg = raw as Record<string, unknown>;
+    if (typeof cfg.type !== 'string' || !TYPES.has(cfg.type)) continue;
+    const parsed: McpServerConfig = { type: cfg.type as McpServerConfig['type'] };
+    if (typeof cfg.enabled === 'boolean') parsed.enabled = cfg.enabled;
+    if (typeof cfg.command === 'string') parsed.command = cfg.command;
+    if (Array.isArray(cfg.args) && cfg.args.every((x) => typeof x === 'string')) {
+      parsed.args = cfg.args as string[];
+    }
+    if (typeof cfg.url === 'string') parsed.url = cfg.url;
+    if (typeof cfg.cwd === 'string') parsed.cwd = cfg.cwd;
+    if (typeof cfg.env === 'object' && cfg.env !== null && !Array.isArray(cfg.env)) {
+      const env: Record<string, string> = {};
+      let okEnv = true;
+      for (const [k, v] of Object.entries(cfg.env as Record<string, unknown>)) {
+        if (typeof v !== 'string') {
+          okEnv = false;
+          break;
+        }
+        env[k] = v;
+      }
+      if (okEnv) parsed.env = env;
+    }
+    if (typeof cfg.headers === 'object' && cfg.headers !== null && !Array.isArray(cfg.headers)) {
+      const headers: Record<string, string> = {};
+      let okH = true;
+      for (const [k, v] of Object.entries(cfg.headers as Record<string, unknown>)) {
+        if (typeof v !== 'string') {
+          okH = false;
+          break;
+        }
+        headers[k] = v;
+      }
+      if (okH) parsed.headers = headers;
+    }
+    out[id] = parsed;
+  }
+  return out;
 }
 
 /** Record<string, string[]> 类型守卫:任一值非字符串数组 → 整个键回退默认值。 */
@@ -113,6 +184,15 @@ export async function readSettings(): Promise<AppSettings> {
       ...(parsed.dataSources !== undefined
         ? { dataSources: parseDataSources(parsed.dataSources) }
         : {}),
+      ...(parsed.tags !== undefined ? { tags: normalizeTags(parsed.tags) } : {}),
+      agentPluginRoot:
+        typeof parsed.agentPluginRoot === 'string' && parsed.agentPluginRoot.trim() !== ''
+          ? parsed.agentPluginRoot
+          : '',
+      disabledPlugins: Array.isArray(parsed.disabledPlugins)
+        ? parsed.disabledPlugins.filter((s): s is string => typeof s === 'string')
+        : [],
+      mcpServers: parseMcpServers(parsed.mcpServers) ?? {},
     };
   } catch {
     return EMPTY;
@@ -141,9 +221,13 @@ export async function recordRecentWorkspace(workspacePath: string): Promise<AppS
     disabledSkills: current.disabledSkills,
     skillCollectionRoot: current.skillCollectionRoot,
     workspaceSkillOverrides: current.workspaceSkillOverrides,
+    agentPluginRoot: current.agentPluginRoot,
+    disabledPlugins: current.disabledPlugins,
+    mcpServers: current.mcpServers,
     ...(current.language !== undefined ? { language: current.language } : {}),
     ...(current.compileModel !== undefined ? { compileModel: current.compileModel } : {}),
     ...(current.dataSources !== undefined ? { dataSources: current.dataSources } : {}),
+    ...(current.tags !== undefined ? { tags: current.tags } : {}),
   };
   await writeSettings(next);
   return next;

@@ -1,8 +1,8 @@
-import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, type Mock, vi } from 'vitest';
 import {
   COMPILE_DEBOUNCE_MS,
-  createCompileScheduler,
   type CompileScheduler,
+  createCompileScheduler,
 } from '../../src/main/ofk/compile-scheduler';
 import { err, ok, type Result } from '../../src/shared/result';
 

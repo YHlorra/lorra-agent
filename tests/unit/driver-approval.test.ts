@@ -9,8 +9,18 @@ import type { EventRouter } from '../../src/main/pi-sdk-driver/event-router';
 // jsdom client 测试图无法打包 node:sqlite,整模块 mock(审批路径不涉及召回注入)。
 vi.mock('../../src/main/memory/recall', () => ({
   RECALL_CONTEXT_MARKER: '<!-- lorra-memory-recall:reference-only -->',
+  buildCoreProjection: vi.fn(() => ({
+    text: '',
+    workspaceIdentity: 'workspace',
+    entryIds: [],
+  })),
+  buildCoreContext: vi.fn(() => ''),
   buildRecallContext: vi.fn(() => ''),
   stripRecallContext: (text: string) => text,
+}));
+
+vi.mock('../../src/main/memory/archival-resolver', () => ({
+  resolveArchivalRecall: vi.fn(async () => null),
 }));
 
 // driver 构造不依赖 SDK 运行时,仅 approval 路径需要 mock AgentSession handle。

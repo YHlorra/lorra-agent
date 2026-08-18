@@ -39,7 +39,6 @@ vi.mock('../../src/main/ofk/day-digest', () => ({
   readDayDigestSegments: dayDigestMock.readDayDigestSegments,
 }));
 
-import { registerTodayHandlers } from '../../src/main/ipc/today-ipc';
 import { localDateString, type TodayDayData } from '../../src/main/memory/day-summary';
 import { ofkBundleRoot, readConcept } from '../../src/main/ofk/ofk-bundle';
 import { err, ok } from '../../src/shared/result';
@@ -87,11 +86,11 @@ function linearSessionJsonl(
 const DAY = localDateString(new Date(2026, 7, 8, 9, 5)); // 本地 2026-08-08
 
 type DayFactsResponse =
-  | { status: 'ok'; value: TodayDayData }
-  | { status: 'error'; error: { code: string; message: string } };
+  | { ok: true; value: TodayDayData }
+  | { ok: false; error: { code: string; message: string } };
 
 function okValue(res: DayFactsResponse): TodayDayData {
-  if (res.status === 'ok') return res.value;
+  if (res.ok) return res.value;
   throw new Error(`expected ok, got ${res.error.code}`);
 }
 
@@ -110,7 +109,7 @@ async function getDayFacts(dateISO: string = DAY) {
   expect(handler).toBeDefined();
   if (!handler) throw new Error('handler missing');
   const res = (await handler(makeFakeEvent(), { dateISO })) as DayFactsResponse;
-  expect(res.status).toBe('ok');
+  expect(res.ok).toBe(true);
   return okValue(res);
 }
 
@@ -119,19 +118,24 @@ describe('today-ipc getDayFacts（OFK bundle 直读）', () => {
   let wsRealA: string;
   let wsRealB: string;
 
-  beforeEach(() => {
+  beforeEach(async () => {
     userdata = mkdtempSync(path.join(tmpdir(), 'lorra-today-'));
     // 真实存在的目录 = 会话头 cwd 的合法形态(workspace.activate 可直接消费)。
     wsRealA = mkdtempSync(path.join(tmpdir(), 'lorra-ws-real-a-'));
     wsRealB = mkdtempSync(path.join(tmpdir(), 'lorra-ws-real-b-'));
     vi.stubEnv('LORRA_E2E_USERDATA', userdata);
     electronMock.handlers.clear();
+    // 模块级 compileScheduler 单例:fire 收尾(compiling→false→清理)跨测试悬置时,
+    // 下个测试 schedule 见 compiling=true 只置 rerun 不设 timer → 防抖永不到期。
+    // 每个测试重置模块图 + 动态重导入 → 全新单例,消除跨测试状态泄漏。
+    vi.resetModules();
     dayDigestMock.dayDigestStaleGroups.mockReset();
     dayDigestMock.dayDigestStaleGroups.mockResolvedValue(ok([])); // 缺省无 stale → 不调度
     dayDigestMock.compileDay.mockReset();
     dayDigestMock.compileDay.mockResolvedValue(ok()); // 缺省成功 no-op(仅 stale 时触发)
     dayDigestMock.readDayDigestSegments.mockReset();
     dayDigestMock.readDayDigestSegments.mockResolvedValue(ok(new Map())); // 缺省无 LLM 段
+    const { registerTodayHandlers } = await import('../../src/main/ipc/today-ipc');
     registerTodayHandlers();
   });
 
@@ -168,10 +172,10 @@ describe('today-ipc getDayFacts（OFK bundle 直读）', () => {
     expect(day.facts[0].workspace).toBe(wsRealA);
     expect(day.workspaces).toHaveLength(1);
     expect(day.workspaces[0].name).toBe(wsRealA);
-    // 大类分区:P1 恒 'uncategorized'(概念 frontmatter 原样透出)
+    // 标签分类:概念 frontmatter category 原样透出(缺省 '未分类')
     expect(day.categories).toEqual([
       {
-        category: 'uncategorized',
+        category: '未分类',
         label: '未分类',
         count: 1,
         totalActiveMs: day.facts[0].activeMs,
@@ -236,7 +240,7 @@ describe('today-ipc getDayFacts（OFK bundle 直读）', () => {
     expect(handler).toBeDefined();
     if (!handler) throw new Error('handler missing');
     const res = (await handler(makeFakeEvent())) as DayFactsResponse;
-    expect(res.status).toBe('ok');
+    expect(res.ok).toBe(true);
     const value = okValue(res);
     expect(value.facts.map((f) => f.sessionRef)).toEqual(['sess-today-default']);
   });
@@ -276,7 +280,7 @@ describe('today-ipc getDayFacts（OFK bundle 直读）', () => {
     expect(day.stats.byPeriod.morning).toBeGreaterThan(0);
     expect(day.stats.byPeriod.afternoon).toBeGreaterThan(0);
     expect(day.categories).toHaveLength(1);
-    expect(day.categories[0].category).toBe('uncategorized');
+    expect(day.categories[0].category).toBe('未分类');
     expect(day.categories[0].count).toBe(2);
     expect(day.categories[0].totalActiveMs).toBe(day.stats.totalActiveMs);
   });
@@ -285,41 +289,57 @@ describe('today-ipc getDayFacts（OFK bundle 直读）', () => {
     seedSession('ws-encoded-a', 'sess-real-a', wsRealA);
 
     await getDayFacts();
-    expect(dayDigestMock.dayDigestStaleGroups).toHaveBeenCalledWith(DAY);
+    expect(dayDigestMock.dayDigestStaleGroups).toHaveBeenCalledWith(DAY, expect.any(Array));
     expect(dayDigestMock.compileDay).not.toHaveBeenCalled();
 
     // 日期参数透传:查 2026-08-09 时以该日判 stale
     await getDayFacts('2026-08-09');
-    expect(dayDigestMock.dayDigestStaleGroups).toHaveBeenLastCalledWith('2026-08-09');
+    expect(dayDigestMock.dayDigestStaleGroups).toHaveBeenLastCalledWith(
+      '2026-08-09',
+      expect.any(Array),
+    );
     expect(dayDigestMock.compileDay).not.toHaveBeenCalled();
   });
 
-  it('S6: stale 非空 → 页面立即返回数据;编译完成后推送 dayCompiled 给请求 sender', async () => {
+  it('S6: stale 非空 → 页面立即返回数据;编译完成后推送 dayCompiled 给请求 sender', {
+    timeout: 30_000,
+  }, async () => {
     seedSession('ws-encoded-a', 'sess-real-a', wsRealA);
     dayDigestMock.dayDigestStaleGroups.mockResolvedValue(
       ok([{ slug: 'C--work-demo', concepts: [] }]),
     );
     const event = makeFakeEvent();
 
-    vi.useFakeTimers();
-    try {
-      const handler = electronMock.handlers.get('lorra.today.getDayFacts');
-      expect(handler).toBeDefined();
-      if (!handler) throw new Error('handler missing');
-      const res = (await handler(event, { dateISO: DAY })) as DayFactsResponse;
-      expect(res.status).toBe('ok'); // 页面数据不等待编译
-      expect(okValue(res).stats.sessionCount).toBe(1);
-      expect(dayDigestMock.compileDay).not.toHaveBeenCalled(); // 防抖期内未编译
+    // 真实 5s 防抖 + vi.waitFor 轮询:不用 fake timers —— 模块级 compileScheduler
+    // 单例与假时钟在并行负载下偶发脱钩(fake setTimeout 绑到已卸载 clock,
+    // advance 永不触发,既往 shuffle 偶发红,非本变更引入)。
+    const handler = electronMock.handlers.get('lorra.today.getDayFacts');
+    expect(handler).toBeDefined();
+    if (!handler) throw new Error('handler missing');
+    const res = (await handler(event, { dateISO: DAY })) as DayFactsResponse;
+    expect(res.ok).toBe(true); // 页面数据不等待编译
+    expect(okValue(res).stats.sessionCount).toBe(1);
+    expect(dayDigestMock.compileDay).not.toHaveBeenCalled(); // 防抖期内未编译
 
-      await vi.advanceTimersByTimeAsync(5_000); // 防抖到期 → 编译 → 推送
-      expect(dayDigestMock.compileDay).toHaveBeenCalledWith(DAY);
-      expect(event.sender.send).toHaveBeenCalledWith('lorra.today.dayCompiled', { dateISO: DAY });
-    } finally {
-      vi.useRealTimers();
-    }
+    // 防抖到期 → 编译 → 推送(真实等待 ≤ COMPILE_DEBOUNCE_MS + 调度余量)
+    await vi.waitFor(() => expect(dayDigestMock.compileDay).toHaveBeenCalled(), {
+      timeout: 20_000,
+      interval: 250,
+    });
+    expect(dayDigestMock.compileDay).toHaveBeenCalledWith(
+      DAY,
+      expect.objectContaining({ tags: expect.any(Array) }),
+    );
+    await vi.waitFor(
+      () =>
+        expect(event.sender.send).toHaveBeenCalledWith('lorra.today.dayCompiled', {
+          dateISO: DAY,
+        }),
+      { timeout: 20_000, interval: 250 },
+    );
   });
 
-  it('S6: compileDay Err → 不推送(fail-open),页面数据照常', async () => {
+  it('S6: compileDay Err → 不推送(fail-open),页面数据照常', { timeout: 30_000 }, async () => {
     seedSession('ws-encoded-a', 'sess-real-a', wsRealA);
     dayDigestMock.dayDigestStaleGroups.mockResolvedValue(
       ok([{ slug: 'C--work-demo', concepts: [] }]),
@@ -329,24 +349,23 @@ describe('today-ipc getDayFacts（OFK bundle 直读）', () => {
     );
     const event = makeFakeEvent();
 
-    vi.useFakeTimers();
-    try {
-      const handler = electronMock.handlers.get('lorra.today.getDayFacts');
-      expect(handler).toBeDefined();
-      if (!handler) throw new Error('handler missing');
-      const res = (await handler(event, { dateISO: DAY })) as DayFactsResponse;
-      expect(res.status).toBe('ok');
-      expect(okValue(res).stats.sessionCount).toBe(1);
+    // 真实 5s 防抖 + vi.waitFor(fake timers 与模块级单例在并行负载下偶发脱钩)。
+    const handler = electronMock.handlers.get('lorra.today.getDayFacts');
+    expect(handler).toBeDefined();
+    if (!handler) throw new Error('handler missing');
+    const res = (await handler(event, { dateISO: DAY })) as DayFactsResponse;
+    expect(res.ok).toBe(true);
+    expect(okValue(res).stats.sessionCount).toBe(1);
 
-      await vi.advanceTimersByTimeAsync(5_000);
-      expect(dayDigestMock.compileDay).toHaveBeenCalledTimes(1);
-      expect(event.sender.send).not.toHaveBeenCalled();
-    } finally {
-      vi.useRealTimers();
-    }
+    await vi.waitFor(() => expect(dayDigestMock.compileDay).toHaveBeenCalledTimes(1), {
+      timeout: 20_000,
+      interval: 250,
+    });
+    // fail-open:编译 Err → 不推送
+    expect(event.sender.send).not.toHaveBeenCalled();
   });
 
-  it('S6: 编译抛出(reject)同样不阻断 getDayFacts,不推送', async () => {
+  it('S6: 编译抛出(reject)同样不阻断 getDayFacts,不推送', { timeout: 30_000 }, async () => {
     seedSession('ws-encoded-a', 'sess-real-a', wsRealA);
     dayDigestMock.dayDigestStaleGroups.mockResolvedValue(
       ok([{ slug: 'C--work-demo', concepts: [] }]),
@@ -354,21 +373,20 @@ describe('today-ipc getDayFacts（OFK bundle 直读）', () => {
     dayDigestMock.compileDay.mockRejectedValue(new Error('compile crashed'));
     const event = makeFakeEvent();
 
-    vi.useFakeTimers();
-    try {
-      const handler = electronMock.handlers.get('lorra.today.getDayFacts');
-      expect(handler).toBeDefined();
-      if (!handler) throw new Error('handler missing');
-      const res = (await handler(event, { dateISO: DAY })) as DayFactsResponse;
-      expect(res.status).toBe('ok');
-      expect(okValue(res).stats.sessionCount).toBe(1);
+    // 真实 5s 防抖 + vi.waitFor(fake timers 与模块级单例在并行负载下偶发脱钩)。
+    const handler = electronMock.handlers.get('lorra.today.getDayFacts');
+    expect(handler).toBeDefined();
+    if (!handler) throw new Error('handler missing');
+    const res = (await handler(event, { dateISO: DAY })) as DayFactsResponse;
+    expect(res.ok).toBe(true);
+    expect(okValue(res).stats.sessionCount).toBe(1);
 
-      await vi.advanceTimersByTimeAsync(5_000);
-      expect(dayDigestMock.compileDay).toHaveBeenCalledTimes(1);
-      expect(event.sender.send).not.toHaveBeenCalled();
-    } finally {
-      vi.useRealTimers();
-    }
+    await vi.waitFor(() => expect(dayDigestMock.compileDay).toHaveBeenCalledTimes(1), {
+      timeout: 20_000,
+      interval: 250,
+    });
+    // fail-open:编译抛错 → 不推送
+    expect(event.sender.send).not.toHaveBeenCalled();
   });
 });
 
@@ -377,7 +395,7 @@ describe('today-ipc 数据源插件并入（）', () => {
   let wsRealA: string;
   let home: string;
 
-  beforeEach(() => {
+  beforeEach(async () => {
     userdata = mkdtempSync(path.join(tmpdir(), 'lorra-today-plug-'));
     wsRealA = mkdtempSync(path.join(tmpdir(), 'lorra-ws-plug-a-'));
     home = mkdtempSync(path.join(tmpdir(), 'lorra-claude-home-'));
@@ -385,12 +403,14 @@ describe('today-ipc 数据源插件并入（）', () => {
     vi.spyOn(os, 'homedir').mockReturnValue(home);
     electronMock.userData = userdata; // settings.json 位于 userData 根(settings 真源)
     electronMock.handlers.clear();
+    vi.resetModules(); // 同上:模块级 compileScheduler 单例跨测试复位
     dayDigestMock.dayDigestStaleGroups.mockReset();
     dayDigestMock.dayDigestStaleGroups.mockResolvedValue(ok([])); // 缺省无 stale → 不调度
     dayDigestMock.compileDay.mockReset();
     dayDigestMock.compileDay.mockResolvedValue(ok());
     dayDigestMock.readDayDigestSegments.mockReset();
     dayDigestMock.readDayDigestSegments.mockResolvedValue(ok(new Map()));
+    const { registerTodayHandlers } = await import('../../src/main/ipc/today-ipc');
     registerTodayHandlers();
   });
 

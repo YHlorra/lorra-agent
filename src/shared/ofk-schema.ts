@@ -4,36 +4,17 @@
  * (仿 src/shared/memory-schema.ts 纪律)。
  */
 
-/** 会话大类枚举(plan D2):时间线分组真源,顺序即展示顺序。 */
-export type SessionCategory =
-  | 'work'
-  | 'programming'
-  | 'reading'
-  | 'chat'
-  | 'project'
-  | 'uncategorized';
+/** 会话标签(2026-08-14 标签分类改造):自由字符串,不再六值枚举。
+ * 真源 = 内置 DEFAULT_TAGS + 用户自定义(设置页管理);LLM 编译时从 tag
+ * 列表选最贴切者,非空串即合法(不在列表内也照显,容错)。 */
+export type SessionCategory = string;
 
-export const SESSION_CATEGORIES: readonly SessionCategory[] = [
-  'work',
-  'programming',
-  'reading',
-  'chat',
-  'project',
-  'uncategorized',
-];
+/** 内置默认标签(页面侧唯一事实源;用户设置缺省时使用)。 */
+export const DEFAULT_TAGS: readonly string[] = ['工作', '编程', '阅读', '闲聊', '项目'];
 
-/** 大类中文标签(页面侧唯一事实源;today 页与聚合共用,不加 i18n 词条)。 */
-export const SESSION_CATEGORY_LABELS: Record<SessionCategory, string> = {
-  work: '工作',
-  programming: '编程',
-  reading: '阅读',
-  chat: '闲聊',
-  project: '项目',
-  uncategorized: '未分类',
-};
-
+/** 非空串即合法 tag(trim 后非空);空串/非字符串 → 非法,落「未分类」。 */
 export function isSessionCategory(value: unknown): value is SessionCategory {
-  return typeof value === 'string' && (SESSION_CATEGORIES as readonly string[]).includes(value);
+  return typeof value === 'string' && value.trim().length > 0;
 }
 
 /**
@@ -45,11 +26,13 @@ export interface TimelineSegment {
   sessionRef: string;
   workspace: string;
   category: SessionCategory;
+  /** 数据源采集器 id(概念 frontmatter sources[0].id;旧概念缺省 'unknown')。 */
+  collector: string;
   start: number; // epoch ms
   end: number; // epoch ms
   activeMs: number; // 段活跃时长(按时间占比从概念 activeMs 分配,见 D5)
   title: string; // 概念 title
-  summary?: string; // LLM 段摘要;无 LLM 段时为 undefined
+  summary?: string; // LLM 段摘要;无 LLM 段时回退概念 description(编译归纳,≠ title 时)
   unfinished: boolean;
   containsTodo: boolean;
   model: string;
@@ -90,6 +73,8 @@ export interface SessionConceptDoc {
   title: string;
   description: string;
   category: SessionCategory;
+  /** 数据源采集器 id(frontmatter sources 块首项 id;旧概念缺省 'unknown')。 */
+  collector: string;
   workspace: string;
   start: string;
   end: string;
@@ -299,11 +284,20 @@ export function parseSessionConcept(md: string): SessionConceptDoc | null {
   const breaks = Array.isArray(fm.breaks)
     ? fm.breaks.filter((b): b is number => typeof b === 'number' && Number.isFinite(b))
     : [];
+  // collector = sources 块首项 id(数据源采集器;旧概念无 sources → 'unknown')
+  const sources = Array.isArray(fm.sources) ? fm.sources : [];
+  const firstSource =
+    sources.length > 0 && typeof sources[0] === 'object' && sources[0] !== null
+      ? (sources[0] as Record<string, unknown>)
+      : null;
+  const collector =
+    firstSource !== null && typeof firstSource.id === 'string' ? firstSource.id : 'unknown';
   return {
     type: 'Session',
     title: str('title'),
     description: str('description'),
-    category: isSessionCategory(fm.category) ? fm.category : 'uncategorized',
+    category: isSessionCategory(fm.category) ? fm.category : '未分类',
+    collector,
     workspace: str('workspace'),
     start,
     end,
@@ -321,7 +315,7 @@ export function parseSessionConcept(md: string): SessionConceptDoc | null {
 
 /**
  * 解析日摘要 frontmatter 的 segments 块 → 段列表;无 segments 键 → []。
- * 逐条校验:ref 非空字符串、category 六值枚举、start/end 非空字符串且
+ * 逐条校验:ref 非空字符串、category 非空串(自由 tag)、start/end 非空字符串且
  * Date.parse 有限;不满足 → 丢弃该条;summary 仅字符串保留。
  */
 export function parseDigestSegments(fm: Record<string, unknown>): Array<{

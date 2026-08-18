@@ -1,4 +1,5 @@
 import { mkdirSync } from 'node:fs';
+import { realpath } from 'node:fs/promises';
 import path from 'node:path';
 import { ipcMain } from 'electron';
 import type { Result, SerializedResult } from '../../shared/result';
@@ -9,7 +10,6 @@ import { createCompileModelInvoke } from '../memory/review-model';
 import { type ReviewMeta, ReviewStore, type StoredReview } from '../memory/review-store';
 import { syncWorkspaceSessions } from '../ofk/session-sync';
 import { lorraConfigDir } from '../pi-sdk-driver/lorra-config-dir';
-import { readWorkspaceRealpath } from '../pi-sdk-driver/workspace-realpath';
 
 /**
  * 复盘 IPC(design D8, 改 OFK 直读):generate(读 bundle 概念/日摘要 →
@@ -43,38 +43,36 @@ export function registerReviewHandlers(getActiveWorkspacePath?: () => string | n
         console.error('[review-ipc] session sync failed:', cause);
       }
       const storeResult = getReviewStore();
-      if (storeResult.isErr()) return { status: 'error', error: storeResult.error };
+      if (storeResult.isErr()) return { ok: false, error: storeResult.error };
       const rawWorkspacePath =
         getActiveWorkspacePath?.() ?? path.join(lorraConfigDir(), 'workspace');
-      const workspacePath = await readWorkspaceRealpath(rawWorkspacePath).catch(
-        () => rawWorkspacePath,
-      );
+      const workspacePath = await realpath(rawWorkspacePath).catch(() => rawWorkspacePath);
       const generated = await generateReview(args, {
         invoke: createCompileModelInvoke(),
         store: storeResult.value,
         workspacePath,
       });
-      if (generated.isErr()) return { status: 'error', error: generated.error };
-      return { status: 'ok', value: generated.value };
+      if (generated.isErr()) return { ok: false, error: generated.error };
+      return { ok: true, value: generated.value };
     },
   );
 
   ipcMain.handle('lorra.review.list', async (): Promise<SerializedResult<ReviewMeta[]>> => {
     const storeResult = getReviewStore();
-    if (storeResult.isErr()) return { status: 'error', error: storeResult.error };
+    if (storeResult.isErr()) return { ok: false, error: storeResult.error };
     const listed = storeResult.value.list();
-    if (listed.isErr()) return { status: 'error', error: listed.error };
-    return { status: 'ok', value: listed.value };
+    if (listed.isErr()) return { ok: false, error: listed.error };
+    return { ok: true, value: listed.value };
   });
 
   ipcMain.handle(
     'lorra.review.read',
     async (_event, args: { id: string }): Promise<SerializedResult<StoredReview>> => {
       const storeResult = getReviewStore();
-      if (storeResult.isErr()) return { status: 'error', error: storeResult.error };
+      if (storeResult.isErr()) return { ok: false, error: storeResult.error };
       const read = storeResult.value.read(args.id);
-      if (read.isErr()) return { status: 'error', error: read.error };
-      return { status: 'ok', value: read.value };
+      if (read.isErr()) return { ok: false, error: read.error };
+      return { ok: true, value: read.value };
     },
   );
 }

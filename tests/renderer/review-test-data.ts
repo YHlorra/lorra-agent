@@ -1,7 +1,7 @@
 /**
  * 复盘引擎测试数据(agent-memory-today-timeline)。
  * IPC 信封与 today-test-data 的 okToday/errToday 同源:生产 SerializedResult
- * {status:'ok',value} / {status:'error',error:{code,message}}。
+ * {ok:true,value} / {ok:false,error:{code,message}}。
  * 契约:window.lorra.review.{generate,list,read} —— 类型单一事实源
  * src/shared/review-api.ts(与 preload 同源,防层间漂移;read 收 { id } 对象)。
  */
@@ -14,15 +14,15 @@ export type { ReviewMeta } from '../../src/shared/review-api';
 
 /** legacy 旧存档形状:模块体系已删,保留 modules 字段以测旧数据兼容。 */
 
-export function okRes<T>(value: T): { status: 'ok'; value: T } {
-  return { status: 'ok', value };
+export function okRes<T>(value: T): { ok: true; value: T } {
+  return { ok: true, value };
 }
 
 export function errRes(
   code: string,
   message: string,
-): { status: 'error'; error: { code: string; message: string } } {
-  return { status: 'error', error: { code, message } };
+): { ok: false; error: { code: string; message: string } } {
+  return { ok: false, error: { code, message } };
 }
 
 export function makeReviewMeta(over: Partial<ReviewMeta> & { id: string }): ReviewMeta {

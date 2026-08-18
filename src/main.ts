@@ -3,17 +3,19 @@ import { fileURLToPath } from 'node:url';
 import { app, BrowserWindow, shell } from 'electron';
 import started from 'electron-squirrel-startup';
 import { setMainLanguage } from './main/i18n';
+import { registerClipboardHandlers } from './main/ipc/clipboard-ipc';
 import { registerEditsHandlers } from './main/ipc/edits-ipc';
 import { registerFsHandlers } from './main/ipc/fs-ipc';
 import { registerMemoryIpc } from './main/ipc/memory-ipc';
 import { registerModelHandlers } from './main/ipc/model-ipc';
-import { registerPluginsHandlers } from './main/ipc/plugins-ipc';
+import { registerAgentPluginsIpc, registerPluginsHandlers } from './main/ipc/plugins-ipc';
 import { registerReviewHandlers } from './main/ipc/review-ipc';
 import { registerSessionHandlers } from './main/ipc/session-ipc';
 import { registerSettingsHandlers } from './main/ipc/settings-ipc';
 import { registerSkillsIpc } from './main/ipc/skills-ipc';
 import { registerTodayHandlers } from './main/ipc/today-ipc';
 import { registerWindowHandlers } from './main/ipc/window-ipc';
+import { isExternalUrl } from './main/lib/external-url';
 import { seedPluginTemplate } from './main/ofk/plugin-template-seed';
 import { ModelConfigAdapter } from './main/pi-sdk-driver/model-config';
 import { installUncaughtHandlers } from './main/pi-sdk-driver/uncaught-handler';
@@ -109,9 +111,9 @@ function createWindow() {
     void window.loadFile(path.join(__dirname, `../renderer/${MAIN_WINDOW_NAME}/index.html`));
   }
   // 外部链接一律系统浏览器打开,拒绝新 Electron 窗口(开源项目页仓库/包地址
-  // 链接均走此路径;协议白名单仅 http/https)。
+  // 链接均走此路径;协议白名单 http/https/mailto 详见 src/main/lib/external-url.ts)。
   window.webContents.setWindowOpenHandler(({ url }) => {
-    if (url.startsWith('https://') || url.startsWith('http://')) void shell.openExternal(url);
+    if (isExternalUrl(url)) void shell.openExternal(url);
     return { action: 'deny' };
   });
   // Bridge the renderer to the active driver so agent events flow back.
@@ -140,15 +142,20 @@ app.whenReady().then(async () => {
 
   registerWorkspaceHandlers(runtime);
   registerFsHandlers({ getActiveWorkspacePath: () => runtime?.getActivePath() ?? null });
+  registerClipboardHandlers({ getActiveWorkspacePath: () => runtime?.getActivePath() ?? null });
   registerSessionHandlers(() => runtime?.getActiveDriver() ?? null);
   registerEditsHandlers(() => runtime?.getActiveDriver() ?? null);
   registerSettingsHandlers();
   registerWindowHandlers();
   registerPluginsHandlers();
+  registerAgentPluginsIpc();
   registerTodayHandlers();
   registerReviewHandlers(() => runtime?.getActivePath() ?? null);
   // 6.13 消化/结晶按工作区落候选:getter 取当前活跃路径(切换后仍取最新)。
-  registerMemoryIpc({ getActiveWorkspacePath: () => runtime?.getActivePath() ?? null });
+  registerMemoryIpc({
+    getActiveWorkspacePath: () => runtime?.getActivePath() ?? null,
+    getActiveDriver: () => runtime?.getActiveDriver() ?? null,
+  });
   // 技能管理(V1):xray 全量 / 全局启停 / 悬空清理,resolveWorkspacePath
   // 内部回退当前工作区(recentWorkspaces 首个,workspace/ipc.ts 同口径)。
   registerSkillsIpc();

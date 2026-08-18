@@ -15,8 +15,18 @@ import type { AgentEvent } from '../../src/shared/agent-events';
 // jsdom client 测试图无法打包 node:sqlite,整模块 mock。
 vi.mock('../../src/main/memory/recall', () => ({
   RECALL_CONTEXT_MARKER: '<!-- lorra-memory-recall:reference-only -->',
+  buildCoreProjection: vi.fn(() => ({
+    text: '',
+    workspaceIdentity: 'workspace',
+    entryIds: [],
+  })),
+  buildCoreContext: vi.fn(() => ''),
   buildRecallContext: vi.fn(() => ''),
   stripRecallContext: (text: string) => text,
+}));
+
+vi.mock('../../src/main/memory/archival-resolver', () => ({
+  resolveArchivalRecall: vi.fn(async () => null),
 }));
 
 /** SDK 消息形状(与 pi-ai dist/api/pi-messages.js createEventConverter 一致)。 */

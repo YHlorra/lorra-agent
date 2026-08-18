@@ -2,15 +2,15 @@ import { mkdirSync, mkdtempSync, rmSync, statSync, writeFileSync } from 'node:fs
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { err, ok } from '../../src/shared/result';
+import { createBuiltinCollectors } from '../../src/main/ofk/builtin-collectors';
+import { readConcept, sessionConceptPath } from '../../src/main/ofk/ofk-bundle';
+import { loadPlugins } from '../../src/main/ofk/plugin-loader';
 import { syncWorkspaceSessions } from '../../src/main/ofk/session-sync';
 import { syncSessionFile, writeSessionConcept } from '../../src/main/ofk/session-writer';
-import { readConcept, sessionConceptPath } from '../../src/main/ofk/ofk-bundle';
-import { readSettings } from '../../src/main/workspace/settings';
-import { loadPlugins } from '../../src/main/ofk/plugin-loader';
-import { createBuiltinCollectors } from '../../src/main/ofk/builtin-collectors';
 import { readSyncState, syncStatePath } from '../../src/main/ofk/sync-state';
+import { readSettings } from '../../src/main/workspace/settings';
 import { FACTS_SCHEMA_VERSION, factIdOf, type SessionFact } from '../../src/shared/facts-schema';
+import { err, ok } from '../../src/shared/result';
 
 // Requirement(plan S3/D2):pi 冷路径记账增量——水位命中 + 概念在位 → 不读不写;
 // 概念缺失 → 强制重提;syncSessionFile Err → 不记账下轮重试;无变化 → 不写盘。
@@ -19,6 +19,7 @@ import { FACTS_SCHEMA_VERSION, factIdOf, type SessionFact } from '../../src/shar
 vi.mock('../../src/main/ofk/session-writer', () => ({
   syncSessionFile: vi.fn(),
   writeSessionConcept: vi.fn(),
+  readExistingMeta: vi.fn(async () => ({ category: '未分类' })),
 }));
 vi.mock('../../src/main/ofk/ofk-bundle', () => ({
   readConcept: vi.fn(),

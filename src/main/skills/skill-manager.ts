@@ -1,5 +1,6 @@
 import type { Dirent, Stats } from 'node:fs';
 import { existsSync, lstatSync, readdirSync, realpathSync, statSync, unlinkSync } from 'node:fs';
+import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { Result as ResultRuntime } from 'better-result';
 
@@ -9,8 +10,11 @@ import type {
   CollectResult,
   InstallResult,
   SkillGitStatus,
+  SkillReadResult,
   SkillXray,
 } from '../../shared/skills-api';
+import { SKILL_FILE_BYTES_MAX } from '../../shared/skills-api';
+import { collectAgentPluginSkillPaths } from '../agent-plugins/loader';
 import { readSettings, writeSettings } from '../workspace/settings';
 import { getSkillStats } from './skill-stats';
 import { collectSkills as collectScatteredSkills } from './skills-collector';
@@ -256,10 +260,21 @@ export async function getSkillXray(wsPath?: string): Promise<Result<SkillXray>> 
   const disabledSkills = settings.disabledSkills ?? [];
   const wsOverrides = settings.workspaceSkillOverrides?.[ws] ?? [];
   const collectionRoot = getSkillCollectionRoot(settings);
+  const disabledPlugins = new Set(settings.disabledPlugins ?? []);
+  const pluginRoot =
+    settings.agentPluginRoot && settings.agentPluginRoot.trim() !== ''
+      ? settings.agentPluginRoot
+      : undefined;
+  // 第 6 源：启用的 agent-plugins 技能根（loader 按 disabledPlugins 过滤）。
+  const agentPluginSkills = await collectAgentPluginSkillPaths({
+    ...(pluginRoot !== undefined ? { root: pluginRoot } : {}),
+    disabled: disabledPlugins,
+  });
   const scanRes = await scanSkills(ws, {
     disabledSkills,
     collectionRoot,
     wsOverrides,
+    agentPluginSkillPaths: agentPluginSkills.map((s) => s.skillsRoot),
   });
   if (scanRes.isErr()) return scanRes;
   const scan = scanRes.value;
@@ -292,6 +307,31 @@ export async function getSkillXray(wsPath?: string): Promise<Result<SkillXray>> 
     collectionRoot,
     workspacePath: ws,
   });
+}
+
+/**
+ * 读取技能文件内容（composer /skill 触发，2026-08-14）：复用 getSkillXray 的
+ * 完整发现面（五源 + 停用名单同一口径），按名定位后读 realPath 原文。
+ * - 未知技能 → skill-not-found（与 setSkillEnabled 同 code/文案）。
+ * - 文件 > SKILL_FILE_BYTES_MAX（1MB）→ skill-too-large（防把巨型文件灌进 prompt）。
+ * - 读取失败 → skill-read-failed（toLorraError 收口）。
+ * 消费方（composer）负责截断提示词，本函数只保证文件级安全上限。
+ */
+export async function readSkillContent(name: string): Promise<Result<SkillReadResult>> {
+  const xrayRes = await getSkillXray();
+  if (xrayRes.isErr()) return xrayRes;
+  const skill = xrayRes.value.skills.find((s) => s.name === name);
+  if (!skill) return err({ code: 'skill-not-found', message: '技能不存在' });
+  try {
+    const st = statSync(skill.realPath);
+    if (st.size > SKILL_FILE_BYTES_MAX) {
+      return err({ code: 'skill-too-large', message: '技能文件过大，无法触发' });
+    }
+    const content = await readFile(skill.realPath, 'utf8');
+    return ok({ name: skill.name, content });
+  } catch (cause) {
+    return err(toLorraError(cause, 'skill-read-failed'));
+  }
 }
 
 // ---- 收集与 git 编排（2026-08-13 批 D7）----

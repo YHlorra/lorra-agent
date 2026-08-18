@@ -35,7 +35,7 @@ beforeEach(() => {
     writable: true,
     configurable: true,
   });
-  // App 需要 window.lorra.memory 才能渲染记忆页(mock 返回 preload toView 形状)。
+  // App 需要 window.lorra.memory 才能渲染记忆页(mock 返回 preload SerializedResult 形状)。
   Object.defineProperty(window.lorra, 'memory', {
     value: {
       listCandidates: vi.fn().mockResolvedValue(okMemory([] as MemoryEntry[])),

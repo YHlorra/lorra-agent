@@ -43,15 +43,12 @@ export interface ReducerState {
 
 export type ReducerAction =
   | { type: 'event-received'; event: AgentEvent }
-  | { type: 'event-batch'; events: AgentEvent[] }
   | { type: 'subscribe-session'; sessionId: string }
-  | { type: 'unsubscribe-session'; sessionId: string }
   | {
       type: 'set-inline-error';
       sessionId: string;
       message: string | undefined;
     }
-  | { type: 'set-active'; sessionId: string | null }
   /** 乐观清除审批模态(点击允许/拒绝后立即收起,事件到达时幂等)。 */
   | { type: 'approval-resolved'; sessionId: string; approvalId: string }
   /** 移除会话内记忆只读通知(自动消退/下一事件覆盖后收起)。 */
@@ -123,13 +120,6 @@ function upsertEvent(events: AgentEvent[], event: AgentEvent): AgentEvent[] {
 
 export function reducer(state: ReducerState, action: ReducerAction): ReducerState {
   switch (action.type) {
-    case 'event-batch': {
-      let next = state;
-      for (const event of action.events) {
-        next = reducer(next, { type: 'event-received', event });
-      }
-      return next;
-    }
     case 'event-received': {
       const ev = action.event;
       const sid = ev.sessionId;
@@ -213,14 +203,6 @@ export function reducer(state: ReducerState, action: ReducerAction): ReducerStat
           };
       return { ...state, activeSessionId: action.sessionId, sessions: nextSessions };
     }
-    case 'unsubscribe-session': {
-      const { [action.sessionId]: _omit, ...rest } = state.sessions;
-      return {
-        ...state,
-        sessions: rest,
-        activeSessionId: state.activeSessionId === action.sessionId ? null : state.activeSessionId,
-      };
-    }
     case 'set-inline-error': {
       const s = state.sessions[action.sessionId];
       if (!s) return state;
@@ -232,8 +214,6 @@ export function reducer(state: ReducerState, action: ReducerAction): ReducerStat
         },
       };
     }
-    case 'set-active':
-      return { ...state, activeSessionId: action.sessionId };
     case 'approval-resolved': {
       const s = state.sessions[action.sessionId];
       if (!s?.pendingApproval || s.pendingApproval.approvalId !== action.approvalId) {

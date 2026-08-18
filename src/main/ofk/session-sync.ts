@@ -5,7 +5,7 @@ import { readSettings } from '../workspace/settings';
 import { createBuiltinCollectors } from './builtin-collectors';
 import { readConcept, sessionConceptPath } from './ofk-bundle';
 import { loadPlugins } from './plugin-loader';
-import { syncSessionFile, writeSessionConcept } from './session-writer';
+import { readExistingMeta, syncSessionFile, writeSessionConcept } from './session-writer';
 import { isFileUnchanged, readSyncState, statFile, updateSyncState } from './sync-state';
 
 /**
@@ -83,7 +83,15 @@ export async function syncWorkspaceSessions(): Promise<void> {
       continue;
     }
     for (const fact of collected.value) {
-      const written = await writeSessionConcept(fact, 'uncategorized');
+      // category + description 保持概念现有值(编译写回不被重同步覆盖,与 pi 路径同纪律)
+      const existing = await readExistingMeta(fact);
+      const written = await writeSessionConcept(
+        fact,
+        existing.category,
+        null,
+        undefined,
+        existing.description,
+      );
       if (written.isErr()) {
         console.error(`[session-sync] ${collector.name} concept write failed:`, written.error);
         // 水位自愈(plan S4/D3):opencode 等按 sources 记账的源,collect 内已

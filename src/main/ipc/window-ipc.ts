@@ -1,7 +1,8 @@
-import { app, BrowserWindow, type IpcMainInvokeEvent, ipcMain } from 'electron';
+import { app, BrowserWindow, type IpcMainInvokeEvent, ipcMain, shell } from 'electron';
 import licenses from '../../shared/licenses.json';
 import type { OpenSourceProject } from '../../shared/licenses-api';
 import { LICENSES_CHANNEL } from '../../shared/licenses-api';
+import { isExternalUrl } from '../lib/external-url';
 
 /**
  * Window control IPC (minimize / maximize-toggle / close).
@@ -37,6 +38,13 @@ export function registerWindowHandlers(): void {
 
   ipcMain.handle('lorra.window.close', (event) => {
     windowOf(event)?.close();
+    return true;
+  });
+
+  /** 外链跳转(2026-08-17):document-viewer Ctrl+点击调用,经 shell 交给系统浏览器。
+ * 协议白名单走 src/main/lib/external-url.ts 单源;此处只负责 shell 转发。 */
+  ipcMain.handle('lorra.app.openExternal', (_e, url: string): boolean => {
+    if (isExternalUrl(url)) void shell.openExternal(url);
     return true;
   });
 }

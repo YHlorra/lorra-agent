@@ -18,21 +18,7 @@ import { SafeMarkdown } from './safe-markdown';
  * 数据经 window.lorra.review 只读消费,modal 只读渲染 markdown(SafeMarkdown)。
  */
 
-// IPC 信封兼容 SerializedResult(status)与 LorraResult(ok)两种判别形状。
-type ReviewResponse<T> =
-  | { status: 'ok'; value: T }
-  | { status: 'error'; error: LorraError }
-  | { ok: true; value: T }
-  | { ok: false; error: LorraError };
-
-function unwrapReview<T>(
-  res: ReviewResponse<T>,
-): { ok: true; value: T } | { ok: false; error: LorraError } {
-  if ('status' in res) {
-    return res.status === 'ok' ? { ok: true, value: res.value } : { ok: false, error: res.error };
-  }
-  return res;
-}
+// IPC 信封:preload 直传 SerializedResult({ok,value}/{ok,error}),消费端按 ok 判别。
 
 function createdTs(meta: ReviewMeta): number {
   const t = new Date(meta.createdAt).getTime();
@@ -60,8 +46,7 @@ export function ReviewRail(): JSX.Element {
     try {
       const res = await window.lorra?.review?.list();
       if (!res) throw new Error(t('review.channelUnavailable'));
-      const unwrapped = unwrapReview(res as ReviewResponse<ReviewMeta[]>);
-      if (unwrapped.ok) setReviews(unwrapped.value);
+      if (res.ok) setReviews(res.value);
     } catch {
       setReviews([]);
     }
@@ -88,9 +73,8 @@ export function ReviewRail(): JSX.Element {
         const req: GenerateArgs = { kind };
         const res = await window.lorra?.review?.generate(req);
         if (!res) throw new Error(t('review.channelUnavailable'));
-        const unwrapped = unwrapReview(res as ReviewResponse<ReviewMeta>);
-        if (!unwrapped.ok) {
-          setGenerateError(unwrapped.error);
+        if (!res.ok) {
+          setGenerateError(res.error);
         } else {
           await refreshList();
         }
@@ -114,9 +98,8 @@ export function ReviewRail(): JSX.Element {
       try {
         const res = await window.lorra?.review?.read({ id });
         if (!res) throw new Error(t('review.channelUnavailable'));
-        const unwrapped = unwrapReview(res as ReviewResponse<StoredReview>);
-        if (unwrapped.ok) setModalContent(unwrapped.value.markdown);
-        else setModalError(unwrapped.error.message);
+        if (res.ok) setModalContent(res.value.markdown);
+        else setModalError(res.error.message);
       } catch (err) {
         setModalError(err instanceof Error ? err.message : String(err));
       } finally {

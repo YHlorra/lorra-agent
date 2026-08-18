@@ -16,7 +16,7 @@ import { type BuiltinCollector, createJsonlCollector } from './collector-core';
  * 如 claude-code)。目录/格式不存在 → Ok([]) fail-open。
  */
 
-export const OH_MY_PI_RUNTIME = 'oh-my-pi';
+const OH_MY_PI_RUNTIME = 'oh-my-pi';
 
 export function createOhMyPiCollector(): BuiltinCollector {
   return createJsonlCollector({

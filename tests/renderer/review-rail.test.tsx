@@ -138,10 +138,10 @@ describe('Requirement: 报告存档与历史', () => {
     const meta = makeReviewMeta({ id: 'r-new', dateISO: '2026-08-07' });
     // 首载空列表;生成成功后刷新返回新条目
     mock.review.list.mockResolvedValueOnce(okRes([])).mockResolvedValue(okRes([meta]));
-    let resolveGen!: (v: { status: 'ok'; value: ReviewMeta }) => void;
+    let resolveGen!: (v: { ok: true; value: ReviewMeta }) => void;
     mock.review.generate.mockReturnValue(
       new Promise((res) => {
-        resolveGen = res as (v: { status: 'ok'; value: ReviewMeta }) => void;
+        resolveGen = res as (v: { ok: true; value: ReviewMeta }) => void;
       }),
     );
     await renderToday();

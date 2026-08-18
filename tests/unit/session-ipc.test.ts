@@ -40,7 +40,7 @@ describe('session-ipc compact 通道', () => {
   it('Given driver 空闲接受 When compact 调用 Then 返回 accepted:true', async () => {
     driver.compact.mockResolvedValue({ accepted: true });
     await expect(call({ sessionId: 's1' })).resolves.toEqual({
-      status: 'ok',
+      ok: true,
       value: { accepted: true },
     });
     expect(driver.compact).toHaveBeenCalledWith('s1');
@@ -49,7 +49,7 @@ describe('session-ipc compact 通道', () => {
   it('Given driver 忙碌拒绝 When compact 调用 Then 透传 accepted:false', async () => {
     driver.compact.mockResolvedValue({ accepted: false });
     await expect(call({ sessionId: 's1' })).resolves.toEqual({
-      status: 'ok',
+      ok: true,
       value: { accepted: false },
     });
   });
@@ -57,7 +57,7 @@ describe('session-ipc compact 通道', () => {
   it('Given driver 抛错 When compact 调用 Then 包装为 session-failed 错误', async () => {
     driver.compact.mockRejectedValue(new Error('Nothing to compact'));
     await expect(call({ sessionId: 's1' })).resolves.toEqual({
-      status: 'error',
+      ok: false,
       error: { code: 'session-failed', message: 'Nothing to compact' },
     });
   });
@@ -69,7 +69,7 @@ describe('session-ipc compact 通道', () => {
     const compact = handlers.get('lorra.session.compact');
     if (!compact) throw new Error('lorra.session.compact not registered');
     await expect(compact({}, { sessionId: 's1' })).resolves.toEqual({
-      status: 'error',
+      ok: false,
       error: { code: 'no-workspace', message: 'workspace not set' },
     });
   });

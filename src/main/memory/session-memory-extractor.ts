@@ -21,6 +21,7 @@ import type { ProposeInput, UpdatePatch } from './memory-store';
 import type { MemoryRecordedPayload } from './propose-memory-tool';
 import type { ModelInvoke } from './review-generator';
 import { createCompileModelInvoke } from './review-model';
+import { truncateBytes } from './text-bytes';
 
 /**
  * 会话记忆提取器（对话自动提取，记忆管道 loop 最后一环）：
@@ -244,21 +245,6 @@ function isAddressable(
   if (candidate.scope === 'user') return entry.scope === 'user';
   // workspace 候选:只能改当前工作区的 workspace 级条目
   return entry.scope === 'workspace' && entry.workspace === workspace;
-}
-
-/** 按 UTF-8 字节从尾部截断字符串(不切断字符,超出部分从头部去掉)。 */
-function truncateBytes(text: string, maxBytes: number): string {
-  if (Buffer.byteLength(text, 'utf8') <= maxBytes) return text;
-  let lo = 0;
-  let hi = text.length;
-  // 二分找最小字符下标使后缀字节 ≤ maxBytes(从尾部截断 = 保留后缀;
-  // 单调:lo 越大后缀字节越少)。返回 text.slice(lo)。
-  while (lo < hi) {
-    const mid = Math.floor((lo + hi) / 2);
-    if (Buffer.byteLength(text.slice(mid), 'utf8') <= maxBytes) hi = mid;
-    else lo = mid + 1;
-  }
-  return text.slice(lo);
 }
 
 /** 从消息 content 提取 tool_use/toolUse/toolCall 块:name + input(截断 150 字符)。 */

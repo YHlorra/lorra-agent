@@ -8,7 +8,7 @@ import { type BuiltinCollector, createJsonlCollector } from './collector-core';
  * 目录/格式不存在 → Ok([]) fail-open。
  */
 
-export const CLAUDE_CODE_RUNTIME = 'claude-code';
+const CLAUDE_CODE_RUNTIME = 'claude-code';
 
 export function createClaudeCodeCollector(): BuiltinCollector {
   return createJsonlCollector({

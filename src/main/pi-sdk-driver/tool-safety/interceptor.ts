@@ -7,6 +7,7 @@ import type {
   ToolCallEventResult,
   ToolResultEvent,
 } from '@earendil-works/pi-coding-agent';
+import { shell } from 'electron';
 import { MEMORY_TOOL_NAME } from '../../memory/propose-memory-tool';
 import { KNOWLEDGE_TOOL_NAME } from '../../ofk/knowledge-tool';
 import type { BlockEmitter } from '../driver';
@@ -17,7 +18,6 @@ import { normalizeBash } from './bash-parser';
 import { classifyHighRisk } from './high-risk-cmd';
 import { resolveAndCheck } from './path-check';
 import { checkWriteSize } from './size-threshold';
-import { trashDelete } from './trash-delete';
 import { isTrustedReadPath, type TrustedPathsOpts } from './trusted-paths';
 
 const WHITELIST = new Set([
@@ -121,8 +121,9 @@ export const createSafetyInterceptor =
         return undefined;
       }
 
-      // Step 1: tool whitelist
-      if (!WHITELIST.has(toolName)) {
+      // Step 1: tool whitelist。MCP 工具（mcp_ 前缀，动态名）按前缀放行 + 审批卡。
+      const isMcpTool = toolName.startsWith('mcp_');
+      if (!WHITELIST.has(toolName) && !isMcpTool) {
         const reason = 'tool-not-allowed';
         deps.emitBlocked({ toolName, target: '', callId: event.toolCallId, safetyNote: reason });
         return { block: true, reason };
@@ -154,6 +155,29 @@ export const createSafetyInterceptor =
             safetyNote: 'approval-denied: 安装被拒绝',
           });
           return { block: true, reason: 'approval-required: 安装被拒绝', terminate: true };
+        }
+        return undefined;
+      }
+
+      // Step 1.6: MCP 工具（mcp_ 前缀，plan S3）→ 首次调用走审批卡。
+      // 会话内同 (toolName, 工具名) 已批准直放（与 install_skill/write 同链）。
+      if (isMcpTool) {
+        if (deps.checkApproved?.(toolName, toolName)) return undefined;
+        const decision =
+          (await deps.requestApproval?.({
+            toolName,
+            target: toolName,
+            reason: 'approval-required: 调用 MCP 工具 ' + toolName,
+            callId: event.toolCallId,
+          })) ?? 'deny';
+        if (decision === 'deny') {
+          deps.emitBlocked({
+            toolName,
+            target: toolName,
+            callId: event.toolCallId,
+            safetyNote: 'approval-denied: MCP 工具调用被拒绝',
+          });
+          return { block: true, reason: 'approval-required: MCP 工具调用被拒绝', terminate: true };
         }
         return undefined;
       }
@@ -396,7 +420,7 @@ export const createSafetyInterceptor =
           for (const t of tokens.slice(1)) {
             if (t.startsWith('-')) continue;
             try {
-              await trashDelete(t);
+              await shell.trashItem(t);
             } catch {
               // best-effort: original bash is blocked anyway, partial trash is acceptable
             }

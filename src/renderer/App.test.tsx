@@ -91,6 +91,29 @@ describe('工作台', () => {
     );
   });
 
+  it('Given 点击顶栏工作区 tab When 激活新工作区 Then 文件树重新拉取新工作区内容(fs.tree 再次调用)', async () => {
+    const user = userEvent.setup();
+    vi.spyOn(window.lorra.workspace, 'list').mockResolvedValue({
+      workspaces: ['C:/test/workspace', 'C:/archive/project'],
+    });
+    const fsTreeSpy = vi.spyOn(window.lorra.fs, 'tree');
+    vi.spyOn(window.lorra.workspace, 'activate').mockResolvedValue({
+      path: 'C:/archive/project',
+    });
+    render(<App />);
+
+    // 初始工作区挂载:文件树拉取一次根。
+    await screen.findByRole('tree', { name: '文件树' });
+    const before = fsTreeSpy.mock.calls.length;
+    expect(before).toBeGreaterThanOrEqual(1);
+
+    // 切换工作区 tab → workspacePath 变化 → FileTree 重挂载(key) → 重新拉取。
+    const tab = await screen.findByRole('tab', { name: /project/ });
+    await user.click(tab);
+
+    await waitFor(() => expect(fsTreeSpy.mock.calls.length).toBeGreaterThan(before));
+  });
+
   it('Given 工作台已激活 When 点击侧栏「新建对话」 Then 调用 lorra.session.create', async () => {
     const user = userEvent.setup();
     const createSpy = vi
@@ -260,6 +283,51 @@ describe('工作台', () => {
     // workspace 视图回来:Agent 对话 region + composer 都在。
     expect(await screen.findByRole('region', { name: 'Agent 对话' })).toBeInTheDocument();
     expect(screen.getByRole('textbox', { name: '向 Agent 提问' })).toBeInTheDocument();
+  });
+
+  it('Given 粘贴图片 When 发送 Then session.send 携带图片 fileId 作为视觉块载荷', async () => {
+    const user = userEvent.setup();
+    const sendSpy = vi
+      .spyOn(window.lorra.session, 'send')
+      .mockResolvedValue({ ok: true, value: { accepted: true } });
+    vi.spyOn(window.lorra.session, 'continueRecent').mockResolvedValue({
+      ok: true,
+      value: { sessionId: 'sess-img' },
+    });
+    render(<App />);
+
+    const textarea = await screen.findByRole('textbox', { name: '向 Agent 提问' });
+    // 模拟剪贴板含图片文件:composer.handlePaste 依据 clipboardData.items 判定。
+    // jsdom 无 DataTransfer,手造形状一致的对象(jest 环境常见做法)。
+    vi.spyOn(window.lorra.clipboard, 'saveImage').mockResolvedValue({
+      ok: true,
+      value: {
+        fileId: '.lorra/attachments/paste-stub.png',
+        name: 'paste-stub.png',
+        dataUrl: 'data:image/png;base64,AAAA',
+      },
+    } as never);
+    const pasteEvent = new Event('paste', { bubbles: true, cancelable: true });
+    Object.defineProperty(pasteEvent, 'clipboardData', {
+      value: {
+        items: [{ kind: 'file', type: 'image/png' }],
+      },
+    });
+    textarea.dispatchEvent(pasteEvent);
+    // saveImage stub 返回文件后渲染图片胶囊。
+    await waitFor(() => expect(screen.getByText('paste-stub.png')).toBeInTheDocument());
+
+    await user.type(textarea, '看看这张图');
+    await user.click(screen.getByRole('button', { name: '发送' }));
+
+    await waitFor(() => {
+      const args = sendSpy.mock.calls[0]?.[0];
+      expect(args).toMatchObject({
+        sessionId: expect.any(String),
+        text: expect.stringContaining('看看这张图'),
+      });
+      expect(args.images).toContainEqual({ fileId: '.lorra/attachments/paste-stub.png' });
+    });
   });
 
   it('Given session.send 失败 When 发送 Then 输入保留并显示错误 banner', async () => {

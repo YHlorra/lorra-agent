@@ -64,6 +64,8 @@ export interface SkillScanOpts {
   collectionRoot?: string;
   /** 当前工作区停用名单（AppSettings.workspaceSkillOverrides[wsRealpath]）：从提示清单剔除、不进预算。 */
   wsOverrides?: string[];
+  /** 启用的 agent-plugins 技能根路径清单（第 6 源；由 agent-plugins/loader 提供，调用方注入）。 */
+  agentPluginSkillPaths?: string[];
 }
 
 /** 扫描内部结构（供 skill-manager 组装 SkillXray；stats/dangling 由 skill-stats/cleanDangling 提供）。 */
@@ -172,9 +174,12 @@ function sourceOf(
   return 'ancestor';
 }
 
-/** scope 映射（D4）：collection/lorra-global/user → global；workspace/ancestor → project。 */
+/** scope 映射（D4）：collection/lorra-global/user/agent-plugin → global；workspace/ancestor → project。 */
 function scopeOf(source: SkillSource): SkillScope {
-  return source === 'collection' || source === 'lorra-global' || source === 'user'
+  return source === 'collection' ||
+    source === 'lorra-global' ||
+    source === 'user' ||
+    source === 'agent-plugin'
     ? 'global'
     : 'project';
 }
@@ -491,6 +496,27 @@ function scanWorkspace(wsPath: string, opts: SkillScanOpts): SkillScan {
         sources.add(existing.source);
         sources.add(skill.source);
         // 同名碰撞：先到者胜，后者丢弃（对齐 SDK loadSkills 同名 winner 语义）。
+      } else {
+        byName.set(skill.name, skill);
+      }
+    }
+  }
+
+  // 第 6 源：启用的 agent-plugins 技能根（source='agent-plugin'，scope=global）。
+  // 排在既有五源之后、去重优先级最后（agent-plugin 技能与散装技能同名时散装胜）。
+  for (const pluginSkillsRoot of opts.agentPluginSkillPaths ?? []) {
+    for (const skill of scanDirForSkills(pluginSkillsRoot, 'agent-plugin', false, visited, 0)) {
+      if (seenReal.has(skill.realPath)) continue;
+      seenReal.add(skill.realPath);
+      const existing = byName.get(skill.name);
+      if (existing) {
+        let sources = nameLosers.get(skill.name);
+        if (!sources) {
+          sources = new Set();
+          nameLosers.set(skill.name, sources);
+        }
+        sources.add(existing.source);
+        sources.add(skill.source);
       } else {
         byName.set(skill.name, skill);
       }

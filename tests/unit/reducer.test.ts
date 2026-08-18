@@ -135,44 +135,6 @@ describe('reducer', () => {
     });
   });
 
-  describe('event-batch', () => {
-    it('Given 已知 session 的批量事件 When dispatch Then 按 seq 升序写入该 session', () => {
-      const state: ReducerState = { sessions: {}, activeSessionId: 's1' };
-      const events = [
-        MESSAGE_FINAL('s1', 3, 'c'),
-        MESSAGE_FINAL('s1', 1, 'a'),
-        MESSAGE_FINAL('s1', 2, 'b'),
-      ];
-      const next = reducer(state, { type: 'event-batch', events });
-      const seqs = next.sessions.s1.events.map((e) => e.seq);
-      expect(seqs).toEqual([1, 2, 3]);
-      expect(
-        next.sessions.s1.events.map((e) => (e as { content: { text: string } }).content.text),
-      ).toEqual(['a', 'b', 'c']);
-    });
-
-    it('Given 含未知 sessionId 的批量事件 When dispatch Then 该 session 仅被 buffer 进 sessions map', () => {
-      const state: ReducerState = { sessions: {}, activeSessionId: 's1' };
-      const events = [MESSAGE_FINAL('s1', 1, 'hi'), MESSAGE_FINAL('ghost', 1, 'g')];
-      const next = reducer(state, { type: 'event-batch', events });
-      // active session 仍只收到 s1 的事件
-      expect(next.sessions.s1.events).toHaveLength(1);
-      // ghost session 被 buffer 但 inactive
-      expect(next.sessions.ghost).toBeDefined();
-      expect(next.sessions.ghost.events).toHaveLength(1);
-      expect(next.sessions.ghost.status).toBe('idle');
-    });
-
-    it('Given 批量事件 When dispatch Then activeSessionId 不被改变', () => {
-      const state: ReducerState = { sessions: {}, activeSessionId: 's1' };
-      const next = reducer(state, {
-        type: 'event-batch',
-        events: [MESSAGE_FINAL('s1', 1, 'x')],
-      });
-      expect(next.activeSessionId).toBe('s1');
-    });
-  });
-
   describe('event-received', () => {
     it('Given 未知 sessionId 且无 active When dispatch Then 创建 idle session 并写入事件', () => {
       const state: ReducerState = { sessions: {}, activeSessionId: null };
@@ -407,34 +369,6 @@ describe('reducer', () => {
     });
   });
 
-  describe('unsubscribe-session', () => {
-    it('Given 非 active session When dispatch Then 该 session 被从 map 中移除', () => {
-      const seeded: ReducerState = {
-        sessions: {
-          s1: { sessionId: 's1', status: 'idle', events: [] },
-          s2: { sessionId: 's2', status: 'idle', events: [] },
-        },
-        activeSessionId: 's1',
-      };
-      const next = reducer(seeded, { type: 'unsubscribe-session', sessionId: 's2' });
-      expect(next.sessions.s2).toBeUndefined();
-      expect(next.sessions.s1).toBeDefined();
-      expect(next.activeSessionId).toBe('s1');
-    });
-
-    it('Given 取消的正是 active session When dispatch Then activeSessionId 置 null', () => {
-      const seeded: ReducerState = {
-        sessions: {
-          s1: { sessionId: 's1', status: 'idle', events: [] },
-        },
-        activeSessionId: 's1',
-      };
-      const next = reducer(seeded, { type: 'unsubscribe-session', sessionId: 's1' });
-      expect(next.sessions.s1).toBeUndefined();
-      expect(next.activeSessionId).toBeNull();
-    });
-  });
-
   describe('set-inline-error', () => {
     it('Given 已存在的 session When dispatch Then 该 session 的 inlineError 被更新', () => {
       const seeded: ReducerState = {
@@ -476,31 +410,6 @@ describe('reducer', () => {
         message: undefined,
       });
       expect(next.sessions.s1.inlineError).toBeUndefined();
-    });
-  });
-
-  describe('set-active', () => {
-    it('Given 新 sessionId When dispatch Then activeSessionId 切换', () => {
-      const seeded: ReducerState = {
-        sessions: {
-          s1: { sessionId: 's1', status: 'idle', events: [] },
-          s2: { sessionId: 's2', status: 'idle', events: [] },
-        },
-        activeSessionId: 's1',
-      };
-      const next = reducer(seeded, { type: 'set-active', sessionId: 's2' });
-      expect(next.activeSessionId).toBe('s2');
-      expect(next.sessions.s1).toBeDefined();
-      expect(next.sessions.s2).toBeDefined();
-    });
-
-    it('Given null When dispatch Then activeSessionId 置空', () => {
-      const seeded: ReducerState = {
-        sessions: { s1: { sessionId: 's1', status: 'idle', events: [] } },
-        activeSessionId: 's1',
-      };
-      const next = reducer(seeded, { type: 'set-active', sessionId: null });
-      expect(next.activeSessionId).toBeNull();
     });
   });
 });

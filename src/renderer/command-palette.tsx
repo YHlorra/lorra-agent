@@ -1,4 +1,5 @@
 import {
+  BookOpenCheck,
   ChevronsDownUp,
   Copy,
   Cpu,
@@ -43,6 +44,7 @@ const COMMAND_ICONS: Record<SlashCommandName, typeof Plus> = {
   hotkeys: Keyboard,
   copy: Copy,
   review: FileText,
+  skill: BookOpenCheck,
 };
 
 interface CommandPaletteProps {

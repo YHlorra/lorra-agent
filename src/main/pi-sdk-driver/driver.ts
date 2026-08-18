@@ -6,16 +6,27 @@ import type {
 } from '@earendil-works/pi-coding-agent';
 import type { WebContents } from 'electron';
 import type { AgentEvent } from '../../shared/agent-events';
+import type {
+  ArchivalAuditDto,
+  CoreProjectionDto,
+  ExperienceAuditDto,
+  WorkingMemorySnapshotDto,
+} from '../../shared/memory-api';
 import type { Result } from '../../shared/result';
 import { err, ok } from '../../shared/result';
 import { tMain } from '../i18n';
+import { resolveArchivalRecall } from '../memory/archival-resolver';
+import { buildExperienceContext, planExperienceContext } from '../memory/experience-planner';
 import type { MemoryRecordedPayload } from '../memory/propose-memory-tool';
-import { buildRecallContext, RECALL_CONTEXT_MARKER, stripRecallContext } from '../memory/recall';
+import { buildCoreProjection, RECALL_CONTEXT_MARKER, stripRecallContext } from '../memory/recall';
+import { planArchivalRecall } from '../memory/retrieval-planner';
+import { WorkingMemoryStore } from '../memory/working-memory';
 import { createEditMechanism } from './edit-history/factory';
 import type { EditMechanism } from './edit-history/mechanism';
 import { type EditRecord, EditRecordStore } from './edit-records';
 import { EventMapper, extractMessageText, extractThinkingSegments } from './event-mapper';
 import { EventRouter } from './event-router';
+import { type ImageContentBlock, loadPastedImages, type PastedImage } from './image-mime';
 import { lorraConfigDir } from './lorra-config-dir';
 import { type SessionRecord, SessionRegistry } from './session-registry';
 
@@ -91,6 +102,8 @@ function isUserMessage(value: unknown): boolean {
 export class LorraDriver {
   private registry = new SessionRegistry();
   private router = new EventRouter();
+  private workingMemory = new WorkingMemoryStore();
+  private lastArchivalAudit = new Map<string, ArchivalAuditDto>();
   private attachedWebContents = new Set<WebContents>();
   // 编辑历史:存储与机制分离,记录与对话卡片经 toolCallId 关联。
   private readonly editStore = new EditRecordStore(path.join(lorraConfigDir(), 'edits'));
@@ -218,6 +231,28 @@ export class LorraDriver {
   /** Returns the sessionId of the currently active (non-idle) session, or null. */
   getActiveSessionId(): string | null {
     return this.registry.activeRecord()?.sessionId ?? null;
+  }
+
+  getCoreProjection(): CoreProjectionDto {
+    return buildCoreProjection(this.opts.workspacePath);
+  }
+
+  getWorkingMemory(sessionId: string): WorkingMemorySnapshotDto | null {
+    return this.workingMemory.getSnapshot(sessionId) ?? null;
+  }
+
+  getLastArchivalAudit(sessionId: string): ArchivalAuditDto | null {
+    return this.lastArchivalAudit.get(sessionId) ?? null;
+  }
+
+  async getExperienceAudit(_nameOrId: string): Promise<ExperienceAuditDto | null> {
+    try {
+      const skills = await import('../skills/generated-skill-store');
+      skills.materializeGeneratedSkills(this.opts.workspacePath);
+      return skills.readGeneratedSkillAudit(this.opts.workspacePath, _nameOrId);
+    } catch {
+      return null;
+    }
   }
 
   /** Emit a `tool.blocked` event for the given session through the router. */
@@ -369,7 +404,10 @@ export class LorraDriver {
       // 热会话增量旁路:会话活动事件 → 重清洗回调(防抖在应用层)。
       if (onActivity && sessionFile) onActivity(sessionFile);
       const mapped = mapper.map(rawEvent);
-      if (mapped) this.router.emit(sessionId, mapped);
+      if (mapped) {
+        this.workingMemory.applyEvent(mapped);
+        this.router.emit(sessionId, mapped);
+      }
       const status = mapper.statusForEvent(rawEvent);
       const rec = this.registry.get(sessionId);
       if (status && rec && status !== rec.status) {
@@ -408,22 +446,31 @@ export class LorraDriver {
     // the persisted log. Cast via unknown — fileEntries is a documented
     // internal of SessionManager and we hand it straight to our mapper.
     const sm = handle.sessionManager as unknown as {
-      fileEntries: Array<{ type: string; message?: unknown }>;
+      fileEntries: Array<{ type: string; id?: string; message?: unknown }>;
       sessionFile?: string;
     };
     const sessionFile = sm.sessionFile ?? '';
     const onActivity = this.opts.onSessionActivity;
     const entries = sm.fileEntries;
+    // jsonl 的 id 在 entry 层,message 对象内无 id(实测全量历史会话如此)。
+    // 不透传 entry id → replayFromMessages 回退随机 messageId → 渲染端
+    // reducer 按 messageId 折叠失效,切回会话时整批历史重复追加(2026-08-15 实锤)。
     const messages = entries
       .filter((e) => e.type === 'message' && e.message)
-      .map((e) => e.message as unknown as Parameters<typeof mapper.replayFromMessages>[0][number]);
+      .map(
+        (e) =>
+          ({ ...(e.message as object), id: e.id }) as unknown as Parameters<
+            typeof mapper.replayFromMessages
+          >[0][number],
+      );
     const replayed = mapper.replayFromMessages(messages);
     for (const replay of replayed) {
+      this.workingMemory.applyEvent(replay);
       this.router.emit(sessionId, replay);
     }
   }
 
-  async send(sessionId: string, text: string): Promise<SendResult> {
+  async send(sessionId: string, text: string, images?: PastedImage[]): Promise<SendResult> {
     const record = this.registry.get(sessionId);
     if (!record) {
       return { accepted: false };
@@ -434,7 +481,16 @@ export class LorraDriver {
       return { accepted: false, busySessionId: active?.sessionId };
     }
 
-    const promptText = this.maybeInjectRecall(record, text);
+    const promptText = await this.maybeInjectMemoryContext(record, text);
+
+    // 粘贴图片 → 视觉内容块(2026-08-15):仅在当前模型具备图像输入能力时
+    // 组装 images 块并传给 SDK prompt(options.images)。非视觉模型 / 图片读
+    // 取失败 / 模型能力未知 → 不传图(fail-open,绝不让图片阻塞发送)。
+    let imageBlocks: ImageContentBlock[] | undefined;
+    if (images && images.length > 0 && this.modelSupportsImages(record)) {
+      const loaded = await loadPastedImages(this.opts.workspacePath, images);
+      if (loaded.ok) imageBlocks = loaded.blocks;
+    }
 
     this.registry.updateStatus(sessionId, 'streaming');
 
@@ -443,7 +499,10 @@ export class LorraDriver {
     // 回答完毕才清空。回合内的状态流转由 SDK 事件流(attachSessionSubscription)
     // 驱动;异步失败在此兜底为 errored + session.status 事件(渲染端据此亮错误条)。
     void record.piSessionHandle
-      .prompt(promptText, { streamingBehavior: 'followUp' })
+      .prompt(promptText, {
+        streamingBehavior: 'followUp',
+        ...(imageBlocks ? { images: imageBlocks } : {}),
+      })
       .catch((error: unknown) => {
         this.registry.updateStatus(sessionId, 'errored');
         const seq = this.registry.nextSeq(sessionId);
@@ -463,21 +522,68 @@ export class LorraDriver {
   }
 
   /**
- * 会话启动记忆召回注入(design 6.6):仅当该会话尚无任何用户消息(新会话/
- * 首次发送)时,在用户文本前拼接召回块(marker 包裹,\n\n 分隔);历史会话
- * 已有消息不注入,避免重复污染。召回为空/构建失败 → 原样返回用户文本
- * (fail-open:召回绝不阻断发送)。
+ * 当前会话模型是否具备图像输入能力。SDK 的 read 工具按
+ * `model.input.includes('image')` 判定(getNonVisionImageNote);此处对齐。
+ * 模型信息缺失(测试桩/未知)一律视为不支持 → 不传图,行为与旧版一致。
  */
-  private maybeInjectRecall(record: SessionRecord, text: string): string {
-    if (this.hasUserMessages(record)) return text;
-    let block = '';
+  private modelSupportsImages(record: SessionRecord): boolean {
+    const model = (record.piSessionHandle as unknown as { model?: { input?: string[] | string } })
+      ?.model;
+    const input = model?.input;
+    if (input === undefined) return false;
+    return (Array.isArray(input) ? input : [input]).includes('image');
+  }
+
+  /**
+ * P1 分层记忆注入:每轮都附 core block;仅在会话尚无任何用户消息时附加首轮
+ * recall 参考块。任一块构建失败都 fail-open, 绝不阻断发送。
+ */
+  private async maybeInjectMemoryContext(record: SessionRecord, text: string): Promise<string> {
+    const sections: string[] = [];
+    const hasUserMessages = this.hasUserMessages(record);
     try {
-      block = buildRecallContext({ workspace: this.opts.workspacePath });
+      const core = buildCoreProjection(this.opts.workspacePath);
+      if (core.text) sections.push(`## Core Memory\n${core.text}`);
     } catch {
-      // fail-open:召回异常绝不阻塞会话启动
+      // fail-open:核心记忆异常绝不阻塞发送
     }
-    if (!block) return text;
-    return `${RECALL_CONTEXT_MARKER}\n${block}\n${RECALL_CONTEXT_MARKER}\n\n${text}`;
+    try {
+      const working = this.workingMemory.buildContext(record.sessionId);
+      if (working) sections.push(`## Working Memory\n${working}`);
+    } catch {
+      // fail-open:会话态记忆异常绝不阻塞发送
+    }
+    const recallPlan = planArchivalRecall(text, hasUserMessages);
+    if (recallPlan) {
+      try {
+        const recall = await resolveArchivalRecall({
+          workspace: this.opts.workspacePath,
+          sources: recallPlan.sources,
+          triggeredBy: recallPlan.triggeredBy,
+          reason: recallPlan.reason,
+          ...(recallPlan.query ? { query: recallPlan.query } : {}),
+        });
+        if (recall) {
+          this.lastArchivalAudit.set(record.sessionId, recall);
+          sections.push(`## Archival Recall\n${recall.text}`);
+        }
+      } catch {
+        // fail-open:召回异常绝不阻塞会话启动
+      }
+    }
+    const experiencePlan = planExperienceContext(text);
+    if (experiencePlan) {
+      try {
+        const experience = await buildExperienceContext(this.opts.workspacePath, experiencePlan);
+        if (experience?.text) {
+          sections.push(`## Experience & Skills\n${experience.text}`);
+        }
+      } catch {
+        // fail-open:经验层异常绝不阻塞发送
+      }
+    }
+    if (sections.length === 0) return text;
+    return `${RECALL_CONTEXT_MARKER}\n${sections.join('\n\n')}\n${RECALL_CONTEXT_MARKER}\n\n${text}`;
   }
 
   /**
@@ -521,15 +627,20 @@ export class LorraDriver {
     if (!record) throw new Error(`session not found: ${sessionId}`);
     if (record.status !== 'idle') return { accepted: false };
     await record.piSessionHandle.compact();
+    this.workingMemory.markCompacted(sessionId);
     return { accepted: true };
   }
 
   async dispose(sessionId: string): Promise<void> {
+    this.workingMemory.clear(sessionId);
+    this.lastArchivalAudit.delete(sessionId);
     this.registry.remove(sessionId);
   }
 
   async shutdownAll(): Promise<void> {
     await this.registry.shutdownAll();
+    this.workingMemory.clearAll();
+    this.lastArchivalAudit.clear();
     // 跨工作区/重启的「已批准」许可不过期保留(会话内记忆语义)。
     this.approvedOnce.clear();
     // 挂起审批 resolve deny(拦截器兜底 block + terminate,不永久挂起)。

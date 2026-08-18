@@ -7,12 +7,11 @@ import {
 } from '../../src/main/memory/day-summary';
 import { segmentsOfConcept, summarizeOfkDay } from '../../src/main/ofk/day-aggregate';
 import type { SegmentSpec } from '../../src/main/ofk/day-digest';
-import type { SessionCategory, SessionConceptDoc } from '../../src/shared/ofk-schema';
-import { SESSION_CATEGORIES } from '../../src/shared/ofk-schema';
+import type { SessionConceptDoc } from '../../src/shared/ofk-schema';
 
 // Requirement(step 8):summarizeOfkDay 承接原 summarizeDay 全部口径
 // (byPeriod 原始毫秒/总量/排序/空退化/workspaces 聚合与 token 着色),新增
-// categories 大类分区统计(按 SESSION_CATEGORIES 序、仅非空、非法值落 uncategorized);
+// categories 标签统计(2026-08-14 起:按段首现顺序、label = tag 本身、空串落 未分类);
 // localDateString/WORKSPACE_COLORS/workspaceColor 断言原样迁入。
 // 审查裁定 #2:byPeriod 三段各为该时段【原始活跃毫秒数】(不是 0-1 占比);
 // 审查裁定 #1:workspaces[].color 为 token 名 ws-1..ws-6(按名稳定分配)。
@@ -24,7 +23,8 @@ function makeConcept(overrides: Partial<SessionConceptDoc> = {}): SessionConcept
     type: 'Session',
     title: 't',
     description: 't',
-    category: 'uncategorized',
+    category: '未分类',
+    collector: 'pi-sdk',
     workspace: 'C:\\work\\demo',
     start: new Date(2026, 7, 8, 9).toISOString(),
     end: new Date(2026, 7, 8, 9, 1).toISOString(),
@@ -144,52 +144,50 @@ describe('summarizeOfkDay', () => {
     expect(a.workspaces[0].color).toBe(b.workspaces[0].color);
   });
 
-  it('categories: 按 SESSION_CATEGORIES 序聚合 count/totalActiveMs, 仅非空', () => {
+  it('categories: 按段首现顺序聚合 count/totalActiveMs,label = tag 本身', () => {
     const data: TodayDayData = summarizeOfkDay(
       [
-        makeConcept({ sessionRef: 'a', category: 'chat', activeMs: 10_000 }),
-        makeConcept({ sessionRef: 'b', category: 'work', activeMs: 60_000 }),
-        makeConcept({ sessionRef: 'c', category: 'work', activeMs: 40_000 }),
-        makeConcept({ sessionRef: 'd', category: 'reading', activeMs: 30_000 }),
+        makeConcept({ sessionRef: 'a', category: '闲聊', activeMs: 10_000 }),
+        makeConcept({ sessionRef: 'b', category: '工作', activeMs: 60_000 }),
+        makeConcept({ sessionRef: 'c', category: '工作', activeMs: 40_000 }),
+        makeConcept({ sessionRef: 'd', category: '阅读', activeMs: 30_000 }),
       ],
       '2026-08-08',
       new Map(),
     );
-    expect(data.categories.map((c) => c.category)).toEqual(['work', 'reading', 'chat']);
+    // 首现顺序(段按 start 升序,同 start 保持概念输入序):闲聊 → 工作 → 阅读
+    expect(data.categories.map((c) => c.category)).toEqual(['闲聊', '工作', '阅读']);
     expect(data.categories).toEqual([
-      { category: 'work', label: '工作', count: 2, totalActiveMs: 100_000 },
-      { category: 'reading', label: '阅读', count: 1, totalActiveMs: 30_000 },
-      { category: 'chat', label: '闲聊', count: 1, totalActiveMs: 10_000 },
+      { category: '闲聊', label: '闲聊', count: 1, totalActiveMs: 10_000 },
+      { category: '工作', label: '工作', count: 2, totalActiveMs: 100_000 },
+      { category: '阅读', label: '阅读', count: 1, totalActiveMs: 30_000 },
     ]);
     // categories 总计数 = sessionCount(与 stats 同源)
     expect(data.categories.reduce((s, c) => s + c.count, 0)).toBe(data.stats.sessionCount);
   });
 
-  it('categories 退化: 非法 category 值落 uncategorized;标签取自 SESSION_CATEGORY_LABELS', () => {
-    const bad = makeConcept({ sessionRef: 'bad', category: 'nonsense' as SessionCategory });
+  it('categories 退化: 空串/非法 category 值落「未分类」(label === category)', () => {
+    const bad = makeConcept({ sessionRef: 'bad', category: '' });
     const data = summarizeOfkDay([bad], '2026-08-08', new Map());
     expect(data.categories).toEqual([
-      { category: 'uncategorized', label: '未分类', count: 1, totalActiveMs: 60_000 },
+      { category: '未分类', label: '未分类', count: 1, totalActiveMs: 60_000 },
     ]);
-    expect(data.facts[0].category).toBe('uncategorized');
+    expect(data.facts[0].category).toBe('未分类');
   });
 
-  it('categories 顺序即 SESSION_CATEGORIES 序(与常量同源)', () => {
+  it('categories 顺序 = 段首现顺序(自由 tag 不再有枚举序)', () => {
     const data = summarizeOfkDay(
       [
-        makeConcept({ sessionRef: 'u', category: 'uncategorized' }),
-        makeConcept({ sessionRef: 'r', category: 'reading' }),
-        makeConcept({ sessionRef: 'w', category: 'work' }),
+        makeConcept({ sessionRef: 'u', category: '未分类' }),
+        makeConcept({ sessionRef: 'r', category: '阅读' }),
+        makeConcept({ sessionRef: 'w', category: '工作' }),
       ],
       '2026-08-08',
       new Map(),
     );
     const order = data.categories.map((c) => c.category);
-    const sorted = [...order].sort(
-      (a, b) => SESSION_CATEGORIES.indexOf(a) - SESSION_CATEGORIES.indexOf(b),
-    );
-    expect(order).toEqual(sorted);
-    expect(order[0]).toBe('work'); // 序首 = work(与 SESSION_CATEGORIES 首元素一致)
+    // 同 start → 概念输入序即首现序
+    expect(order).toEqual(['未分类', '阅读', '工作']);
   });
 
   it('本地日边界语义: 概念 start 的本地日决定其归属', () => {
@@ -282,7 +280,7 @@ describe('segmentsOfConcept / summarizeOfkDay segments', () => {
   it('有 LLM 段 → 用 LLM 段(category/start/end/summary 取段值);解析失败项丢弃', () => {
     const concept = makeConcept({
       sessionRef: 's1',
-      category: 'uncategorized',
+      category: '未分类',
       start: at(9),
       end: at(10),
       activeMs: 3_600_000,
@@ -318,6 +316,47 @@ describe('segmentsOfConcept / summarizeOfkDay segments', () => {
     const segments = segmentsOfConcept(concept, llm);
     expect(segments).toHaveLength(1);
     expect(segments[0].category).toBe('programming');
+  });
+
+  it('块标题:概念 description(编译归纳)≠ title → 段 summary 取 description', () => {
+    const concept = makeConcept({
+      sessionRef: 's-desc',
+      title: 'Complete assignment thoroughly',
+      description: '彻底完成作业:源码梳理与三项修复',
+    });
+    const segments = segmentsOfConcept(concept, undefined);
+    expect(segments).toHaveLength(1);
+    expect(segments[0].summary).toBe('彻底完成作业:源码梳理与三项修复');
+    expect(segments[0].title).toBe('Complete assignment thoroughly');
+  });
+
+  it('块标题:description = title(播种初值,未编译)→ summary 缺省(不贴用户提示词当归纳)', () => {
+    const concept = makeConcept({
+      sessionRef: 's-seed',
+      title: 'Complete assignment thoroughly',
+      description: 'Complete assignment thoroughly',
+    });
+    const segments = segmentsOfConcept(concept, undefined);
+    expect(segments).toHaveLength(1);
+    expect(segments[0].summary).toBeUndefined();
+  });
+
+  it('块标题:LLM 段 summary 优先于概念 description', () => {
+    const concept = makeConcept({
+      sessionRef: 's-both',
+      title: 'raw prompt',
+      description: '整会话归纳',
+      start: at(9),
+      end: at(10),
+    });
+    const llm: SegmentSpec[] = [
+      { category: '编程', start: at(9), end: at(10), summary: '段级摘要' },
+    ];
+    const segments = segmentsOfConcept(concept, llm);
+    expect(segments[0].summary).toBe('段级摘要');
+    // 无段 summary 的 LLM 段 → 回退概念 description
+    const noSummary = segmentsOfConcept(concept, [{ category: '编程', start: at(9), end: at(10) }]);
+    expect(noSummary[0].summary).toBe('整会话归纳');
   });
 
   it('summarizeOfkDay: segments 按 start 升序输出;categories 按段统计(段数/段 activeMs 合计)', () => {
@@ -363,11 +402,12 @@ describe('segmentsOfConcept / summarizeOfkDay segments', () => {
     ]);
     expect(data.segments.map((s) => s.category)).toEqual(['work', 'chat', 'reading', 'reading']);
 
-    // categories 按段:reading count=2(300_000+300_000),work count=1,chat count=1
+    // categories 按段(首现顺序:09:00 work → 09:15 chat → 10:00 reading):
+    // reading count=2(300_000+300_000),work count=1,chat count=1;label = tag 本身
     expect(data.categories).toEqual([
-      { category: 'work', label: '工作', count: 1, totalActiveMs: 150_000 },
-      { category: 'reading', label: '阅读', count: 2, totalActiveMs: 600_000 },
-      { category: 'chat', label: '闲聊', count: 1, totalActiveMs: 150_000 },
+      { category: 'work', label: 'work', count: 1, totalActiveMs: 150_000 },
+      { category: 'chat', label: 'chat', count: 1, totalActiveMs: 150_000 },
+      { category: 'reading', label: 'reading', count: 2, totalActiveMs: 600_000 },
     ]);
     // facts 统计口径不变(sessionCount = 概念数,非段数)
     expect(data.stats.sessionCount).toBe(2);

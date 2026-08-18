@@ -12,6 +12,7 @@ import { assembleReviewPayload, type ReviewPayload, type ReviewRequest } from '.
 import dailyReviewSeed from './review-skill-seeds/daily-review.md?raw';
 import deepReviewSeed from './review-skill-seeds/deep-review.md?raw';
 import type { ReviewMeta, ReviewStore } from './review-store';
+import { truncateUtf8ToBytes } from './text-bytes';
 
 // 组装契约类型从 review-assembler 再导出,消费方(测试/前端)统一从本模块入口取。
 export type {
@@ -41,8 +42,11 @@ const SEED_BY_SKILL: Record<ReviewSkillName, string> = {
   'deep-review': deepReviewSeed,
 };
 
-/** 技能文件加载 + 首用播种:目标不存在 → 写入内置种子原文;存在 → 原样使用。
- * 供复盘技能(daily-review/deep-review)与 OFK 摘要技能(ofk-digest)共用。 */
+/** 加载/播种 skill 文件(.lorra/skills/<name>.md):目标缺失 → 写入 seed;存在 → 原样读取。
+ * 通用入口,被 review-generator / memory-maintenance / skill-meta 三处共用。
+ * 错误码 seed-skill-failed(2026-08-17 收敛):三处失败模式一致(磁盘 IO/路径错误),
+ * message 字段自带 ENOENT 上下文足够定位,无需细分 code。
+ */
 export function loadOrSeedSkill(workspacePath: string, name: string, seed: string): Result<string> {
   try {
     const target = path.join(workspacePath, '.lorra', 'skills', `${name}.md`);
@@ -52,7 +56,7 @@ export function loadOrSeedSkill(workspacePath: string, name: string, seed: strin
     }
     return ok(readFileSync(target, 'utf8'));
   } catch (cause) {
-    return err(toLorraError(cause, 'review-skill-load-failed'));
+    return err(toLorraError(cause, 'seed-skill-failed'));
   }
 }
 
@@ -124,19 +128,6 @@ export async function generateReview(
   } catch (cause) {
     return err(toLorraError(cause, 'review-generation-failed'));
   }
-}
-
-/** 蒸馏内容截断: utf8 字节级 ≤ MEMORY_CONTENT_MAX_BYTES, 不劈开多字节字符。 */
-function truncateUtf8ToBytes(text: string, maxBytes: number): string {
-  if (Buffer.byteLength(text, 'utf8') <= maxBytes) return text;
-  let low = 0;
-  let high = text.length;
-  while (low < high) {
-    const mid = Math.ceil((low + high) / 2);
-    if (Buffer.byteLength(text.slice(0, mid), 'utf8') <= maxBytes) low = mid;
-    else high = mid - 1;
-  }
-  return text.slice(0, low);
 }
 
 /** 报告标题: 取首个 markdown 标题行; 缺失 → 兜底标题（<每日/每周深度>复盘 <dateISO>）。 */

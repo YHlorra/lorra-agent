@@ -240,6 +240,7 @@ describe('设置页:数据源组（）', () => {
         defaultHideThinking: false,
         compileModel: null,
         dataSources: { claudeCode: false, opencode: false, ohMyPi: true, workbuddy: false },
+        tags: ['工作', '写作'],
       },
     });
     // 预置 store 为全关(模拟刚启动未水合)
@@ -382,5 +383,91 @@ describe('设置页:开源项目页', () => {
 
     expect(await screen.findByRole('alert')).toHaveTextContent('加载失败');
     expect(screen.getByText('加载失败')).toBeInTheDocument();
+  });
+});
+
+describe('设置页:标签组(2026-08-14 今日页标签管理)', () => {
+  it('导航含「标签」;点击后渲染 chip 列表(settings.get 真源)', async () => {
+    const user = userEvent.setup();
+    vi.spyOn(window.lorra.settings, 'get').mockResolvedValue({
+      ok: true,
+      value: {
+        showHiddenFiles: false,
+        language: 'zh',
+        defaultHideThinking: false,
+        compileModel: null,
+        dataSources: { claudeCode: false, opencode: false, ohMyPi: false, workbuddy: false },
+        tags: ['工作', '写作'],
+      },
+    });
+    render(<SettingsPage />);
+
+    expect(screen.getByRole('button', { name: '标签' })).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: '标签' }));
+
+    expect(await screen.findByTestId('settings-tags')).toBeInTheDocument();
+    expect(screen.getAllByTestId('tag-chip')).toHaveLength(2);
+    expect(screen.getByTestId('tag-input')).toBeInTheDocument();
+    expect(screen.getByTestId('tag-add')).toBeInTheDocument();
+  });
+
+  it('添加标签:输入 + 点击添加 → settings.set({tags}) + chip 出现;trim 空/重复忽略', async () => {
+    const user = userEvent.setup();
+    const settingsSet = vi.spyOn(window.lorra.settings, 'set');
+    vi.spyOn(window.lorra.settings, 'get').mockResolvedValue({
+      ok: true,
+      value: {
+        showHiddenFiles: false,
+        language: 'zh',
+        defaultHideThinking: false,
+        compileModel: null,
+        dataSources: { claudeCode: false, opencode: false, ohMyPi: false, workbuddy: false },
+        tags: ['工作'],
+      },
+    });
+    render(<SettingsPage />);
+    await user.click(screen.getByRole('button', { name: '标签' }));
+    await screen.findByTestId('settings-tags');
+
+    await user.type(screen.getByTestId('tag-input'), ' 写作 ');
+    await user.click(screen.getByTestId('tag-add'));
+    expect(settingsSet).toHaveBeenCalledWith({ tags: ['工作', '写作'] });
+    expect(await screen.findByText('写作')).toBeInTheDocument();
+
+    // 重复添加 → 忽略(不触发 set)
+    settingsSet.mockClear();
+    await user.type(screen.getByTestId('tag-input'), '工作');
+    await user.click(screen.getByTestId('tag-add'));
+    expect(settingsSet).not.toHaveBeenCalled();
+
+    // 空输入 → 忽略
+    settingsSet.mockClear();
+    await user.type(screen.getByTestId('tag-input'), '   ');
+    await user.click(screen.getByTestId('tag-add'));
+    expect(settingsSet).not.toHaveBeenCalled();
+  });
+
+  it('删除标签:chip × → settings.set({tags}) 且 chip 消失', async () => {
+    const user = userEvent.setup();
+    const settingsSet = vi.spyOn(window.lorra.settings, 'set');
+    vi.spyOn(window.lorra.settings, 'get').mockResolvedValue({
+      ok: true,
+      value: {
+        showHiddenFiles: false,
+        language: 'zh',
+        defaultHideThinking: false,
+        compileModel: null,
+        dataSources: { claudeCode: false, opencode: false, ohMyPi: false, workbuddy: false },
+        tags: ['工作', '写作'],
+      },
+    });
+    render(<SettingsPage />);
+    await user.click(screen.getByRole('button', { name: '标签' }));
+    await screen.findAllByTestId('tag-chip');
+
+    await user.click(screen.getByRole('button', { name: '删除标签「写作」' }));
+    expect(settingsSet).toHaveBeenCalledWith({ tags: ['工作'] });
+    expect(screen.queryByText('写作')).not.toBeInTheDocument();
+    expect(screen.getByText('工作')).toBeInTheDocument();
   });
 });

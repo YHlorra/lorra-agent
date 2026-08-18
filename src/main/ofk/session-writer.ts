@@ -108,6 +108,8 @@ export function buildSessionConcept(
   sequence: RawSessionEntry[] | null,
   category: SessionCategory,
   sourceJsonl?: string,
+  /** LLM 整会话归纳(P2 编译写回);重清洗时保留,缺省 = title 播种初值。 */
+  description?: string,
 ): string {
   const startISO = new Date(fact.start).toISOString();
   const endISO = new Date(fact.end).toISOString();
@@ -117,7 +119,7 @@ export function buildSessionConcept(
     '---',
     'type: Session',
     `title: ${yamlQuote(fact.title)}`,
-    `description: ${yamlQuote(fact.title)}`,
+    `description: ${yamlQuote(description ?? fact.title)}`,
     `category: ${category}`,
     `workspace: ${yamlQuote(fact.workspace)}`,
     `sessionRef: ${yamlQuote(fact.sessionRef)}`,
@@ -164,8 +166,9 @@ export async function writeSessionConcept(
   category: SessionCategory,
   sequence: RawSessionEntry[] | null = null,
   sourceJsonl?: string,
+  description?: string,
 ): Promise<Result<void>> {
-  const content = buildSessionConcept(fact, sequence, category, sourceJsonl);
+  const content = buildSessionConcept(fact, sequence, category, sourceJsonl, description);
   const rel = sessionConceptPath(fact);
   const logEntry = `**Creation**: [${fact.title.replace(/[[\]]/g, '')}](${rel})`;
   return writeWithMeta(rel, content, logEntry);
@@ -175,7 +178,8 @@ export async function writeSessionConcept(
  * 冷路径全量同步(step 4/5):读 jsonl → parseSessionJsonl →
  * cleanseSession(校验+事实)→ resolveActiveSequence(正文序列)→
  * writeSessionConcept(内容相同跳过)。坏文件 → Err,调用方 fail-open。
- * category 保持概念现有值(agent 维护;P2 摘要编译写回后不被清洗覆盖)。
+ * category 与 description 保持概念现有值(agent/编译维护;P2 摘要编译
+ * 写回后不被清洗覆盖)。
  */
 export async function syncSessionFile(
   jsonlPath: string,
@@ -203,17 +207,34 @@ export async function syncSessionFile(
   const fact = cleansed.value;
   const sequenceResult = resolveActiveSequence(parsed.header, parsed.entries);
   const sequence = sequenceResult.isOk() ? sequenceResult.value : null;
-  const existingCategory = await readExistingCategory(fact);
-  const written = await writeSessionConcept(fact, existingCategory, sequence, jsonlPath);
+  const existing = await readExistingMeta(fact);
+  const written = await writeSessionConcept(
+    fact,
+    existing.category,
+    sequence,
+    jsonlPath,
+    existing.description,
+  );
   if (written.isErr()) return written;
   return ok(fact);
 }
 
-/** 读概念现有 category(缺失/解析失败 → 'uncategorized')。 */
-async function readExistingCategory(fact: SessionFact): Promise<SessionCategory> {
+/** 读概念现有 category + description(缺失/解析失败 → 未分类 / undefined)。
+ * description 与 title 相同(清洗播种初值)→ undefined,不写回旧值。 */
+export async function readExistingMeta(fact: SessionFact): Promise<{
+  category: SessionCategory;
+  description?: string;
+}> {
   const read = await readConcept(sessionConceptPath(fact));
-  if (read.isErr() || read.value === null) return 'uncategorized';
+  if (read.isErr() || read.value === null) return { category: '未分类' };
   const parsed = parseSessionConcept(read.value);
-  if (!parsed) return 'uncategorized';
-  return isSessionCategory(parsed.category) ? parsed.category : 'uncategorized';
+  if (!parsed) return { category: '未分类' };
+  const description =
+    parsed.description.trim().length > 0 && parsed.description !== parsed.title
+      ? parsed.description
+      : undefined;
+  return {
+    category: isSessionCategory(parsed.category) ? parsed.category : '未分类',
+    ...(description !== undefined ? { description } : {}),
+  };
 }

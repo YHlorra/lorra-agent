@@ -20,17 +20,12 @@ import {
   useRef,
   useState,
 } from 'react';
+import { ThinkingOrb } from 'thinking-orbs';
 import { useAppStore } from '@/lib/app-store';
 import { cn } from '@/lib/utils';
 import type { TodayDayData } from '../main/memory/day-summary';
 import type { MessageKey } from '../shared/i18n-core';
-import {
-  isSessionCategory,
-  SESSION_CATEGORIES,
-  SESSION_CATEGORY_LABELS,
-  type SessionCategory,
-  type TimelineSegment,
-} from '../shared/ofk-schema';
+import type { TimelineSegment } from '../shared/ofk-schema';
 import type { LorraError } from '../shared/result';
 import { useT } from './lib/i18n';
 import { ReviewRail } from './review-rail';
@@ -46,9 +41,13 @@ type Tr = (key: MessageKey, params?: Record<string, string | number>) => string;
  * 归并块发丝接缝 + 空档标签 + 可点选图例 + 悬停 tooltip + 空态/错误态。
  */
 
-/** 时间线几何(design.md D7):每小时 32px,块高∝active_ms,最小高度由 CSS 兜底。 */
-export const PX_PER_HOUR = 32;
-/** 甘特列间距(列宽百分比扣除量,视觉留缝)。 */
+/** 时间线几何:每小时 64px(24h = 1536px),块高 ∝ active_ms,最小高度 BLOCK_MIN_PX 兜底。 */
+export const PX_PER_HOUR = 64;
+/** 块最小高度(与 CSS --tl-block-min-h 同源):保证单行文字可读。 */
+const BLOCK_MIN_PX = 24;
+/** 同列相邻块垂直缝(下推留缝,块互不覆盖)。 */
+const BLOCK_GAP_PX = 2;
+/** 甘特列缝(宽度百分比扣除量,视觉留缝)。 */
 const GAP_PCT = 2;
 /** 空档标签阈值:≥60 分钟的空档才标注(留白即信息)。 */
 const GAP_LABEL_MS = 60 * 60_000;
@@ -69,22 +68,6 @@ interface TipState {
   block: TimelineSegment;
   x: number;
   y: number;
-}
-
-// 渲染层 IPC 响应兼容两种判别形状(公开契约 SerializedResult + 既有 RpcEnvelope/LorraResult 现状)。
-type TodayResponse =
-  | { status: 'ok'; value: TodayDayData }
-  | { status: 'error'; error: LorraError }
-  | { ok: true; value: TodayDayData }
-  | { ok: false; error: LorraError };
-
-function unwrapToday(
-  res: TodayResponse,
-): { ok: true; value: TodayDayData } | { ok: false; error: LorraError } {
-  if ('status' in res) {
-    return res.status === 'ok' ? { ok: true, value: res.value } : { ok: false, error: res.error };
-  }
-  return res;
 }
 
 /** ISO 字符串 / epoch ms / "HH:MM" 兜底 → 当日分钟数。 */
@@ -133,6 +116,7 @@ function fmtGap(ms: number, tr: Tr): string {
  * 区间堆叠(interval partitioning):段按 start 升序(同 start 按 end 升序),
  * 贪心放入第一个可容纳的列(laneEnds[i] <= seg.start);返回每段的列号(0 起)。
  * 列数无上限(重叠列数即最大重叠深度)。不做任何相邻段合并(语义段是细分单元)。
+ * 仅作为 layoutSection 的簇内分列原语 + 单测契约保留。
  */
 export function assignLanes(segments: TimelineSegment[]): number[] {
   const sorted = segments
@@ -151,6 +135,78 @@ export function assignLanes(segments: TimelineSegment[]): number[] {
     }
   }
   return laneOf;
+}
+
+/** 分区内每块的最终几何:簇内列号/列数 + 下推后的 top/height(px,相对本分区轨道)。 */
+export interface BlockLayout {
+  lane: number;
+  laneCount: number;
+  top: number;
+  height: number;
+}
+
+/**
+ * 局部簇分列 + 甘特列(2026-08-14 不重叠改造):
+ * 第一遍按时间重叠切簇(段 start < 簇内最大 end 才并簇),簇内区间堆叠分列;
+ * 列互相不相交:宽 = 100/laneCount − 缝、left = lane × 100/laneCount,
+ * 跨列垂直重叠不再互相遮挡(截图级叠瓦根除);
+ * 第二遍按时间序全局下推:height = max(时长高, 最小高),仅同 lane 前块底 + 缝
+ * 超过本块时间位时下推留缝(只推不拉,最小高度撑出时段不越位)。
+ * 未完成段(今天)延伸至当前时刻线 nowTop;历史日期 nowTop 传 null 按 activeMs。
+ */
+export function layoutSection(
+  segments: TimelineSegment[],
+  opts: { pxPerHour: number; minH: number; gap: number; nowTop: number | null },
+): BlockLayout[] {
+  const order = segments
+    .map((seg, idx) => ({ seg, idx }))
+    .sort((a, b) => a.seg.start - b.seg.start || a.seg.end - b.seg.end);
+  const placed = new Array<{
+    cluster: number;
+    lane: number;
+    laneCount: number;
+    top0: number;
+    top: number;
+    height: number;
+  }>(segments.length);
+  let cluster: Array<{ seg: TimelineSegment; idx: number }> = [];
+  let clusterEnd = -Infinity;
+  let clusterId = -1;
+  const flush = (): void => {
+    if (cluster.length === 0) return;
+    clusterId += 1;
+    const lanes = assignLanes(cluster.map((c) => c.seg));
+    const laneCount = Math.max(...lanes) + 1;
+    cluster.forEach((c, k) => {
+      const top0 = (minutesOfDay(c.seg.start) * opts.pxPerHour) / 60;
+      const height =
+        c.seg.unfinished && opts.nowTop !== null
+          ? Math.max(opts.nowTop - top0, opts.minH)
+          : Math.max((c.seg.activeMs * opts.pxPerHour) / 3_600_000, opts.minH);
+      placed[c.idx] = { cluster: clusterId, lane: lanes[k], laneCount, top0, top: top0, height };
+    });
+    cluster = [];
+    clusterEnd = -Infinity;
+  };
+  for (const item of order) {
+    const startMin = minutesOfDay(item.seg.start);
+    if (cluster.length > 0 && startMin >= clusterEnd) flush();
+    cluster.push(item);
+    clusterEnd = Math.max(clusterEnd, minutesOfDay(item.seg.end));
+  }
+  flush();
+  // 第二遍按时间序全局下推:甘特列不相交,跨列垂直重叠不遮挡;
+  // 仅同 lane 前块(最小高度撑出时段)底部越界时下推留缝(只推不拉,不越位)。
+  const out = new Array<BlockLayout>(segments.length);
+  for (let k = 0; k < order.length; k++) {
+    const p = placed[order[k].idx];
+    for (let j = 0; j < k; j++) {
+      const q = placed[order[j].idx];
+      if (q.lane === p.lane) p.top = Math.max(p.top, q.top + q.height + opts.gap);
+    }
+    out[order[k].idx] = { lane: p.lane, laneCount: p.laneCount, top: p.top, height: p.height };
+  }
+  return out;
 }
 
 /** ≥60 分钟的空档给出淡色标签(00:00 起至 24:00)。 */
@@ -179,6 +235,27 @@ function gapRuns(segments: TimelineSegment[], tr: Tr): Array<{ centerMin: number
 
 /** 工作区色板回退 token(与 styles.css --ws-1..6 同源;缺省时按出现顺序取色)。 */
 const FALLBACK_TOKENS = ['ws-1', 'ws-2', 'ws-3', 'ws-4', 'ws-5', 'ws-6'] as const;
+
+/** 智能体显示名映射(collector → 展示名;未知回退原串)。 */
+const AGENT_LABELS: Record<string, string> = {
+  'pi-sdk': 'lorra',
+  'claude-code': 'Claude Code',
+  opencode: 'OpenCode',
+  'oh-my-pi': 'Oh My Pi',
+  workbuddy: 'WorkBuddy',
+};
+
+/**
+ * 标签 → 色板 token 稳定映射(与后端 workspaceColor 同款 31 哈希 % 6;
+ * renderer 不引 main 模块,复制同源算法,token 名与 --ws-N 同源)。
+ */
+function tagColor(tag: string): string {
+  let hash = 0;
+  for (let i = 0; i < tag.length; i++) {
+    hash = (hash * 31 + tag.charCodeAt(i)) >>> 0;
+  }
+  return FALLBACK_TOKENS[hash % FALLBACK_TOKENS.length];
+}
 
 /** 本地日键 YYYY-MM-DD(与后端 day-summary.localDateString 同口径)。 */
 function localDateKey(d: Date): string {
@@ -248,10 +325,11 @@ class ReviewRailErrorBoundary extends Component<RailBoundaryProps, { hasError: b
 export function TodayPage({ onBack, onOpenSession }: TodayPageProps): JSX.Element {
   const setPage = useAppStore((s) => s.setPage);
   const t = useT();
+  const theme = useAppStore((s) => s.theme);
   const [phase, setPhase] = useState<'loading' | 'ready' | 'error'>('loading');
   const [data, setData] = useState<TodayDayData | null>(null);
   const [error, setError] = useState<LorraError | null>(null);
-  const [filterWs, setFilterWs] = useState<string | null>(null);
+  const [filterTag, setFilterTag] = useState<string | null>(null);
   const [tip, setTip] = useState<TipState | null>(null);
   // 所选日期:null = 今天(getDayFacts 省略 dateISO);其他 = YYYY-MM-DD(本地日)。
   const [dateISO, setDateISO] = useState<string | null>(null);
@@ -269,12 +347,11 @@ export function TodayPage({ onBack, onOpenSession }: TodayPageProps): JSX.Elemen
         .then((res) => {
           if (cancelled) return;
           if (!res) throw new Error(t('today.channelUnavailable'));
-          const unwrapped = unwrapToday(res as TodayResponse);
-          if (unwrapped.ok) {
-            setData(unwrapped.value);
+          if (res.ok) {
+            setData(res.value);
             setPhase('ready');
           } else {
-            setError(unwrapped.error);
+            setError(res.error);
             setPhase('error');
           }
         })
@@ -373,9 +450,8 @@ export function TodayPage({ onBack, onOpenSession }: TodayPageProps): JSX.Elemen
       .then(() => window.lorra?.today?.getDayFacts(iso ?? undefined))
       .then((res) => {
         if (!res) return;
-        const unwrapped = unwrapToday(res as TodayResponse);
-        if (unwrapped.ok) {
-          setData(unwrapped.value);
+        if (res.ok) {
+          setData(res.value);
           setPhase('ready');
         }
       })
@@ -470,89 +546,51 @@ export function TodayPage({ onBack, onOpenSession }: TodayPageProps): JSX.Elemen
   }, []);
 
   /**
- * 大类分区(plan D1 step 7 + 分段改造):TodayDayData.segments 驱动,按
- * categories 序;每分区 = 类名 + 计数 + 该类渲染段(先按 category 过滤,
- * 段内不再合并——语义段是细分单元;每分区独立做区间堆叠分列)。
- * 兜底:旧数据无 categories → 按 SESSION_CATEGORIES 序补齐;段缺失 → 空分区。
+ * 单条 24h 轨道(2026-08-14 标签分类改造):不再按类别分区;所有段合成
+ * 一条时间线,块颜色 = tag(tagColor),tag 过滤 chip 行 + 图例做筛选。
  */
-  const categorySections = useMemo(() => {
-    if (!data) return [];
-    const segs = data.segments ?? [];
-    const byCategory = new Map<SessionCategory, TimelineSegment[]>();
-    for (const seg of segs) {
-      const cat = isSessionCategory(seg.category) ? seg.category : 'uncategorized';
-      const list = byCategory.get(cat) ?? [];
-      list.push(seg);
-      byCategory.set(cat, list);
-    }
-    const ordered: SessionCategory[] = [];
-    const seen = new Set<SessionCategory>();
-    for (const c of data.categories ?? []) {
-      if (!seen.has(c.category) && byCategory.has(c.category)) {
-        ordered.push(c.category);
-        seen.add(c.category);
-      }
-    }
-    for (const cat of SESSION_CATEGORIES) {
-      if (byCategory.has(cat) && !seen.has(cat)) {
-        ordered.push(cat);
-        seen.add(cat);
-      }
-    }
-    if (ordered.length === 0 && segs.length > 0) ordered.push('uncategorized');
-    const statOf = new Map((data.categories ?? []).map((c) => [c.category, c]));
-    return ordered.map((cat) => {
-      const catSegs = byCategory.get(cat) ?? [];
-      const lanes = assignLanes(catSegs);
-      const laneCount = catSegs.length > 0 ? Math.max(...lanes) + 1 : 1;
-      const stat = statOf.get(cat);
-      return {
-        category: cat,
-        label: SESSION_CATEGORY_LABELS[cat],
-        count: stat?.count ?? catSegs.length,
-        totalActiveMs: stat?.totalActiveMs ?? catSegs.reduce((s, x) => s + x.activeMs, 0),
-        segments: catSegs,
-        lanes,
-        laneCount,
-        gaps: gapRuns(catSegs, t),
-      };
-    });
-  }, [data, t]);
-  // 工作区信息:以投影 workspaces 为准(颜色/时长同源);图例只列当日有活动(时长>0)的工作区。
-  // 事实中出现但投影未列出的工作区:块着色回退色板,不进图例(design「退出的工作区不出现」)。
-  const wsInfo = useMemo(() => {
-    const map = new Map<string, { color: string; totalActiveMs: number }>();
-    const workspaces = data?.workspaces ?? [];
-    let idx = 0;
-    for (const ws of workspaces) {
-      map.set(ws.name, {
-        color: ws.color || FALLBACK_TOKENS[idx % FALLBACK_TOKENS.length],
-        totalActiveMs: ws.totalActiveMs,
+  const allSegments = useMemo(
+    () => [...(data?.segments ?? [])].sort((a, b) => a.start - b.start || a.end - b.end),
+    [data],
+  );
+  const allGaps = useMemo(() => gapRuns(allSegments, t), [allSegments, t]);
+  // 单轨几何(局部簇分列 + 甘特不相交列 + 最小高度下推):今天未完成段延伸至当前时刻线。
+  const nowMin = now.getHours() * 60 + now.getMinutes();
+  const nowTop = (nowMin * PX_PER_HOUR) / 60;
+
+  const sectionLayouts = useMemo(() => {
+    const extendTop = isToday ? nowTop : null;
+    return [
+      layoutSection(allSegments, {
+        pxPerHour: PX_PER_HOUR,
+        minH: BLOCK_MIN_PX,
+        gap: BLOCK_GAP_PX,
+        nowTop: extendTop,
+      }),
+    ];
+  }, [allSegments, isToday, nowTop]);
+  // 标签统计与图例:以聚合 categories(段计数/段时长)为准;图例 = 当日出现的标签。
+  const tagStats = useMemo(() => {
+    const map = new Map<string, { count: number; totalActiveMs: number }>();
+    for (const c of data?.categories ?? []) {
+      const prev = map.get(c.category) ?? { count: 0, totalActiveMs: 0 };
+      map.set(c.category, {
+        count: prev.count + c.count,
+        totalActiveMs: prev.totalActiveMs + c.totalActiveMs,
       });
-      idx++;
-    }
-    for (const f of data?.facts ?? []) {
-      if (!map.has(f.workspace)) {
-        map.set(f.workspace, {
-          color: FALLBACK_TOKENS[idx % FALLBACK_TOKENS.length],
-          totalActiveMs: 0,
-        });
-        idx++;
-      }
     }
     return map;
   }, [data]);
-  const colorOf = useCallback((name: string) => wsInfo.get(name)?.color ?? 'ws-1', [wsInfo]);
   const legendEntries = useMemo(
     () =>
-      Array.from(wsInfo.entries())
-        .filter(([, info]) => info.totalActiveMs > 0)
-        .map(([name, info]) => ({ name, color: info.color, totalActiveMs: info.totalActiveMs })),
-    [wsInfo],
+      Array.from(tagStats.entries()).map(([tag, stat]) => ({
+        tag,
+        color: tagColor(tag),
+        count: stat.count,
+        totalActiveMs: stat.totalActiveMs,
+      })),
+    [tagStats],
   );
-
-  const nowMin = now.getHours() * 60 + now.getMinutes();
-  const nowTop = (nowMin * PX_PER_HOUR) / 60;
 
   const head = (
     <header className="today-head">
@@ -742,8 +780,8 @@ export function TodayPage({ onBack, onOpenSession }: TodayPageProps): JSX.Elemen
             </div>
           </section>
 
-          {/* 工作区图例:可点选高亮对应会话块;颜色与时间线块同源(data-color)。
- 空数据时无活动工作区,不渲染(与恒渲染的 KPI 卡解耦)。 */}
+          {/* 标签图例:可点选高亮对应会话块;颜色与时间线块同源(data-color)。
+ 空数据时无标签出现,不渲染(与恒渲染的 KPI 卡解耦)。 */}
           {legendEntries.length > 0 && (
             <section
               className="legend"
@@ -751,23 +789,23 @@ export function TodayPage({ onBack, onOpenSession }: TodayPageProps): JSX.Elemen
               data-testid="today-legend"
             >
               <span className="legend-label">{t('today.legend.title')}</span>
-              {legendEntries.map((ws) => {
-                const on = filterWs === ws.name;
+              {legendEntries.map((tag) => {
+                const on = filterTag === tag.tag;
                 return (
                   <button
-                    key={ws.name}
+                    key={tag.tag}
                     type="button"
                     data-testid="today-legend-item"
-                    data-workspace={ws.name}
+                    data-tag={tag.tag}
                     className={cn('legend-chip', on && 'is-on')}
                     aria-pressed={on}
-                    data-color={ws.color}
-                    style={{ '--chip-color': toColorVar(ws.color) } as CSSProperties}
-                    onClick={() => setFilterWs(on ? null : ws.name)}
+                    data-color={tag.color}
+                    style={{ '--chip-color': toColorVar(tag.color) } as CSSProperties}
+                    onClick={() => setFilterTag(on ? null : tag.tag)}
                   >
                     <i className="legend-dot" aria-hidden="true" />
-                    {ws.name}
-                    <span className="dur">{fmtDuration(ws.totalActiveMs, t)}</span>
+                    {tag.tag}
+                    <span className="dur">{tag.count}</span>
                   </button>
                 );
               })}
@@ -816,134 +854,156 @@ export function TodayPage({ onBack, onOpenSession }: TodayPageProps): JSX.Elemen
  该类会话块(独立 24h 轨道,块仍按时间定位) */}
               {ready && data && (
                 <>
-                  {categorySections.map((sec) => (
-                    <section
-                      key={sec.category}
-                      className="tl-cat"
-                      data-testid="today-category"
-                      data-category={sec.category}
-                    >
-                      <div className="tl-cat-head">
-                        <span className="tl-cat-name">{sec.label}</span>
-                        <span className="tl-cat-count" data-testid="today-category-count">
-                          {sec.count}
-                        </span>
-                      </div>
-                      <div className="tl-lane">
-                        {/* 时间轴刻度(每分区一条 24h 轨道) */}
-                        {Array.from({ length: 12 }, (_, i) => i * 2).map((h) => (
-                          <div
-                            key={h}
-                            className="tl-tick"
-                            data-testid="today-hour"
-                            data-hour={h}
-                            style={{ top: `${h * PX_PER_HOUR}px` }}
-                            aria-hidden="true"
+                  <section className="tl-cat" data-testid="today-category" data-category="all">
+                    <div className="tl-cat-head">
+                      <span className="tl-cat-name">{t('today.timeline.sectionAll')}</span>
+                      <span className="tl-cat-count" data-testid="today-category-count">
+                        {allSegments.length}
+                      </span>
+                    </div>
+                    {/* 标签过滤 chip 行:全部 + 当日出现的标签(色点 = tagColor);点击过滤 */}
+                    <div className="tag-filter" data-testid="today-tag-filter">
+                      <button
+                        type="button"
+                        className={cn('tag-chip', filterTag === null && 'is-on')}
+                        data-tag="all"
+                        aria-pressed={filterTag === null}
+                        onClick={() => setFilterTag(null)}
+                      >
+                        {t('today.filter.all')}
+                      </button>
+                      {legendEntries.map((tag) => (
+                        <button
+                          key={tag.tag}
+                          type="button"
+                          className={cn('tag-chip', filterTag === tag.tag && 'is-on')}
+                          data-tag={tag.tag}
+                          aria-pressed={filterTag === tag.tag}
+                          style={{ '--chip-color': toColorVar(tag.color) } as CSSProperties}
+                          onClick={() => setFilterTag(filterTag === tag.tag ? null : tag.tag)}
+                        >
+                          <i className="legend-dot" aria-hidden="true" />
+                          {tag.tag}
+                          <span className="dur">{tag.count}</span>
+                        </button>
+                      ))}
+                    </div>
+                    <div className="tl-lane">
+                      {/* 时间轴刻度(单条 24h 轨道) */}
+                      {Array.from({ length: 12 }, (_, i) => i * 2).map((h) => (
+                        <div
+                          key={h}
+                          className="tl-tick"
+                          data-testid="today-hour"
+                          data-hour={h}
+                          style={{ top: `${h * PX_PER_HOUR}px` }}
+                          aria-hidden="true"
+                        >
+                          <span>{String(h).padStart(2, '0')}:00</span>
+                        </div>
+                      ))}
+                      {Array.from({ length: 24 }, (_, h) => h).map((h) => (
+                        <div
+                          key={h}
+                          className={cn('tl-gridline', h % 2 === 0 && 'major')}
+                          style={{ top: `${h * PX_PER_HOUR}px` }}
+                          aria-hidden="true"
+                        />
+                      ))}
+                      {/* 当前时刻线(仅今天;查看历史日期不渲染) */}
+                      {isToday && (
+                        <div
+                          className="tl-now"
+                          data-testid="today-now-line"
+                          style={{ top: `${nowTop}px` }}
+                          aria-hidden="true"
+                        >
+                          <span className="now-tag">
+                            {t('today.nowTag', {
+                              time: `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`,
+                            })}
+                          </span>
+                        </div>
+                      )}
+                      {/* 空档标签:≥60 分钟的空档是有效信息 */}
+                      {allGaps.map((g, i) => (
+                        <div
+                          key={i}
+                          className="tl-gap"
+                          style={{ top: `${(g.centerMin * PX_PER_HOUR) / 60}px` }}
+                        >
+                          {g.label}
+                        </div>
+                      ))}
+                      {/* 会话块:top∝段开始时刻(下推只推不拉),height∝段 active_ms 且
+ ≥ 最小高度;同 lane 相邻块下推留缝互不覆盖;甘特分列——
+ 宽 = 100/laneCount − 2% 缝、left = lane × 100/laneCount,列不相交 */}
+                      {allSegments.map((seg, i) => {
+                        const color = tagColor(seg.category);
+                        const unfinished = seg.unfinished;
+                        const geo = sectionLayouts[0][i];
+                        const dimmed = filterTag !== null && filterTag !== seg.category;
+                        const colW = 100 / geo.laneCount;
+                        const delay = Math.min(i * ENTRANCE_STAGGER_MS, ENTRANCE_STAGGER_MAX_MS);
+                        return (
+                          <button
+                            key={`${seg.workspace}-${seg.sessionRef}-${seg.start}`}
+                            type="button"
+                            data-testid="today-block"
+                            data-workspace={seg.workspace}
+                            data-tag={seg.category}
+                            data-session-count={1}
+                            data-category={seg.category}
+                            data-unfinished={unfinished ? 'true' : undefined}
+                            className={cn(
+                              'tl-block',
+                              'tl-seg',
+                              'in',
+                              dimmed && 'dim',
+                              unfinished && 'unfinished',
+                            )}
+                            style={
+                              {
+                                top: `${geo.top}px`,
+                                height: `${geo.height}px`,
+                                left: `${geo.lane * colW}%`,
+                                width: `${colW - GAP_PCT}%`,
+                                animationDelay: `${delay}ms`,
+                                '--block-color': toColorVar(color),
+                                '--z': String(geo.lane + 1),
+                              } as CSSProperties
+                            }
+                            data-color={color}
+                            onClick={() => handleOpen(seg)}
+                            onMouseEnter={(e) => showTip(e, seg)}
+                            onMouseMove={moveTip}
+                            onMouseLeave={hideTip}
+                            onFocus={(e) => showTipAt(e.currentTarget, seg)}
+                            onBlur={hideTip}
                           >
-                            <span>{String(h).padStart(2, '0')}:00</span>
-                          </div>
-                        ))}
-                        {Array.from({ length: 24 }, (_, h) => h).map((h) => (
-                          <div
-                            key={h}
-                            className={cn('tl-gridline', h % 2 === 0 && 'major')}
-                            style={{ top: `${h * PX_PER_HOUR}px` }}
-                            aria-hidden="true"
-                          />
-                        ))}
-                        {/* 当前时刻线(仅今天;查看历史日期不渲染) */}
-                        {isToday && (
-                          <div
-                            className="tl-now"
-                            data-testid="today-now-line"
-                            style={{ top: `${nowTop}px` }}
-                            aria-hidden="true"
-                          >
-                            <span className="now-tag">
-                              {t('today.nowTag', {
-                                time: `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`,
-                              })}
-                            </span>
-                          </div>
-                        )}
-                        {/* 空档标签:≥60 分钟的空档是有效信息 */}
-                        {sec.gaps.map((g, i) => (
-                          <div
-                            key={i}
-                            className="tl-gap"
-                            style={{ top: `${(g.centerMin * PX_PER_HOUR) / 60}px` }}
-                          >
-                            {g.label}
-                          </div>
-                        ))}
-                        {/* 会话块:top∝段开始时刻,height∝段 active_ms;left/width 按
- lane 分列(区间堆叠,重叠段并排不覆盖);颜色与图例同源 */}
-                        {sec.segments.map((seg, i) => {
-                          const color = colorOf(seg.workspace);
-                          const startMin = minutesOfDay(seg.start);
-                          const top = (startMin * PX_PER_HOUR) / 60;
-                          const unfinished = seg.unfinished;
-                          // 未完成段(设计定稿 v2):今天延伸至当前时刻线(start→now),受最小高度约束;
-                          // 查看历史日期(非今天)时高度按 activeMs,不延伸。
-                          const height =
-                            unfinished && isToday
-                              ? Math.max(((nowMin - startMin) * PX_PER_HOUR) / 60, 2)
-                              : Math.max((seg.activeMs * PX_PER_HOUR) / 3_600_000, 2);
-                          const dimmed = filterWs !== null && filterWs !== seg.workspace;
-                          const laneIdx = sec.lanes[i];
-                          const laneWidthPct = 100 / sec.laneCount;
-                          const delay = Math.min(i * ENTRANCE_STAGGER_MS, ENTRANCE_STAGGER_MAX_MS);
-                          return (
-                            <button
-                              key={`${seg.workspace}-${seg.sessionRef}-${seg.start}`}
-                              type="button"
-                              data-testid="today-block"
-                              data-workspace={seg.workspace}
-                              data-session-count={1}
-                              data-category={seg.category}
-                              data-unfinished={unfinished ? 'true' : undefined}
-                              className={cn(
-                                'tl-block',
-                                'tl-seg',
-                                'in',
-                                dimmed && 'dim',
-                                unfinished && 'unfinished',
-                              )}
-                              style={
-                                {
-                                  top: `${top}px`,
-                                  height: `${height}px`,
-                                  left: `${laneIdx * laneWidthPct}%`,
-                                  width: `${laneWidthPct - GAP_PCT}%`,
-                                  animationDelay: `${delay}ms`,
-                                  '--block-color': toColorVar(color),
-                                } as CSSProperties
-                              }
-                              data-color={color}
-                              onClick={() => handleOpen(seg)}
-                              onMouseEnter={(e) => showTip(e, seg)}
-                              onMouseMove={moveTip}
-                              onMouseLeave={hideTip}
-                              onFocus={(e) => showTipAt(e.currentTarget, seg)}
-                              onBlur={hideTip}
-                            >
-                              <span className="tl-block-inner">
-                                <span className="b-time">
-                                  {fmtTime(seg.start)}–{fmtTime(seg.end)}
-                                </span>
-                                {unfinished && (
-                                  <span className="b-badge">{t('today.block.unfinished')}</span>
-                                )}
-                                <span className="b-title">{seg.summary ?? seg.title}</span>
-                                <span className="b-dur">{fmtDuration(seg.activeMs, t)}</span>
+                            <span className="tl-block-inner">
+                              <span className="b-time">
+                                {fmtTime(seg.start)}–{fmtTime(seg.end)}
                               </span>
-                            </button>
-                          );
-                        })}
-                      </div>
-                    </section>
-                  ))}
-                  {/* 悬停详情(工作区/起止/时长/模型/Token/工具数;token 取概念事实) */}
+                              {unfinished && (
+                                <>
+                                  {/* 进行中光球(thinking-orbs breathing):时间线唯一持续动效,
+ 与聊天窗思考环同组件同语汇;theme 随 深浅。 */}
+                                  <span className="tl-live-orb" aria-hidden="true">
+                                    <ThinkingOrb state="breathing" size={20} theme={theme} />
+                                  </span>
+                                  <span className="b-badge">{t('today.block.unfinished')}</span>
+                                </>
+                              )}
+                              <span className="b-title">{seg.summary ?? seg.title}</span>
+                              <span className="b-dur">{fmtDuration(seg.activeMs, t)}</span>
+                            </span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </section>
+                  {/* 悬停详情(标题/起止/标签/智能体/时长) */}
                   {tip && (
                     <div
                       className="tl-tooltip show"
@@ -956,7 +1016,7 @@ export function TodayPage({ onBack, onOpenSession }: TodayPageProps): JSX.Elemen
                         ),
                       }}
                     >
-                      <div className="tt-title">{tip.block.workspace}</div>
+                      <div className="tt-title">{tip.block.summary ?? tip.block.title}</div>
                       <div className="tt-row">
                         <span className="tt-k">{t('today.tooltip.period')}</span>
                         <span className="tt-v">
@@ -964,25 +1024,18 @@ export function TodayPage({ onBack, onOpenSession }: TodayPageProps): JSX.Elemen
                         </span>
                       </div>
                       <div className="tt-row">
-                        <span className="tt-k">{t('today.tooltip.duration')}</span>
-                        <span className="tt-v">{fmtDuration(tip.block.activeMs, t)}</span>
+                        <span className="tt-k">{t('today.tooltip.tag')}</span>
+                        <span className="tt-v">{tip.block.category}</span>
                       </div>
                       <div className="tt-row">
-                        <span className="tt-k">{t('today.tooltip.model')}</span>
-                        <span className="tt-v">{tip.block.model}</span>
-                      </div>
-                      <div className="tt-row">
-                        <span className="tt-k">{t('today.tooltip.tokens')}</span>
+                        <span className="tt-k">{t('today.tooltip.agent')}</span>
                         <span className="tt-v">
-                          {fmtTokens(
-                            data?.facts.find((f) => f.sessionRef === tip.block.sessionRef)
-                              ?.tokens ?? 0,
-                          )}
+                          {AGENT_LABELS[tip.block.collector] ?? tip.block.collector}
                         </span>
                       </div>
                       <div className="tt-row">
-                        <span className="tt-k">{t('today.tooltip.tools')}</span>
-                        <span className="tt-v">{tip.block.tools.join('、')}</span>
+                        <span className="tt-k">{t('today.tooltip.duration')}</span>
+                        <span className="tt-v">{fmtDuration(tip.block.activeMs, t)}</span>
                       </div>
                     </div>
                   )}

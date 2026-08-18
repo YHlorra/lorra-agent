@@ -12,7 +12,12 @@ const ScrollArea = React.forwardRef<
     className={cn('relative overflow-hidden', className)}
     {...props}
   >
-    <ScrollAreaPrimitive.Viewport className="h-full w-full rounded-[inherit]">
+    {/* [&>div]:!block — Radix viewport 内置 display:table 包装层按内容计算宽度,
+ 长无断行文本(会话标题/文件名)会把它撑到窗口级(实测 14350px),w-full 子元素
+ 延伸到中栏下方被 document 面板盖住,真实鼠标点击永远到不了按钮(会话栏无法
+ 切换根因)。项目内 ScrollArea 仅承担纵向滚动,横向滚动场景(宽表格)由
+ .md-table-wrap 自理,故安全地强制 block。 */}
+    <ScrollAreaPrimitive.Viewport className="h-full w-full rounded-[inherit] [&>div]:!block">
       {children}
     </ScrollAreaPrimitive.Viewport>
     <ScrollBar />

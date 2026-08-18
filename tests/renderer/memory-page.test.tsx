@@ -9,7 +9,7 @@
  * 关系面板)/ 已撤销仍显示(中栏只渲染 active,归档折叠进左栏灰态行)。
  * - src/shared/memory-schema.ts(八类/证据标签/MemoryEntry/MemoryEvent)。
  *
- * mock 形状 = preload bridge 产出:window.lorra.memory.* 返回 LorraResult
+ * mock 形状 = preload bridge 产出:window.lorra.memory.* 返回 SerializedResult
  * ({ok,value}/{ok,error}),与 src/preload.ts memory bridge 类型同源。
  */
 import { render, screen, waitFor, within } from '@testing-library/react';
@@ -18,7 +18,7 @@ import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from 'vite
 
 import { MemoryPage } from '../../src/renderer/memory-page';
 import type { MemoryEntry, MemoryEvent } from '../../src/shared/memory-schema';
-import type { LorraError, LorraResult } from '../../src/shared/result';
+import type { LorraError, SerializedResult } from '../../src/shared/result';
 import { installLorraMock, type LorraMock } from './lorra-test-helpers';
 
 // ---------------------------------------------------------------------------
@@ -67,8 +67,8 @@ export function makeMemoryEvent(over: Partial<MemoryEvent>): MemoryEvent {
   } as MemoryEvent;
 }
 
-export const ok = <T,>(value: T): LorraResult<T> => ({ ok: true, value });
-const fail = (code: string, message: string): LorraResult<never> => ({
+export const ok = <T,>(value: T): SerializedResult<T> => ({ ok: true, value });
+const fail = (code: string, message: string): SerializedResult<never> => ({
   ok: false,
   error: { code, message } satisfies LorraError,
 });
@@ -83,6 +83,10 @@ export interface MemoryLorraMock extends LorraMock {
     listActive: Mock;
     listArchived: Mock;
     listLinks: Mock;
+    getCoreProjection: Mock;
+    getWorkingMemory: Mock;
+    getArchivalAudit: Mock;
+    okfCheck: Mock;
     edit: Mock;
     retire: Mock;
     search: Mock;
@@ -99,6 +103,10 @@ export function installMemoryLorraMock(): MemoryLorraMock {
     listActive: vi.fn(),
     listArchived: vi.fn(),
     listLinks: vi.fn(),
+    getCoreProjection: vi.fn(),
+    getWorkingMemory: vi.fn(),
+    getArchivalAudit: vi.fn(),
+    okfCheck: vi.fn(),
     edit: vi.fn(),
     retire: vi.fn(),
     search: vi.fn(),
@@ -142,9 +150,51 @@ function seedMock(mock: MemoryLorraMock, fx: MemoryFixture): void {
   mock.memory.listActive.mockResolvedValue(ok(fx.active));
   mock.memory.listArchived.mockResolvedValue(ok(fx.archived));
   mock.memory.listLinks.mockResolvedValue(ok(fx.links ?? []));
+  mock.memory.getCoreProjection.mockResolvedValue(
+    ok({
+      text: '- [workspace_identity] 当前工作区：test',
+      workspaceIdentity: 'test',
+      entryIds: ['core-1'],
+    }),
+  );
+  mock.memory.getWorkingMemory.mockResolvedValue(
+    ok({
+      goal: '完成分层记忆',
+      constraints: ['最小 diff'],
+      openLoops: [],
+      recentCorrections: [],
+      recentDecisions: [],
+      pendingFacts: [],
+      updatedAt: 1,
+    }),
+  );
+  mock.memory.getArchivalAudit.mockResolvedValue(
+    ok({
+      reason: '用户在追问历史决策或既有事实',
+      triggeredBy: 'history',
+      sources: ['memory'],
+      query: '之前怎么定的',
+      memoryEntryIds: ['mem-1'],
+      ofkPaths: ['memory/mem-1.md'],
+      text: '- [working_context] 历史决定：xxx',
+      updatedAt: 1,
+    }),
+  );
+  mock.memory.okfCheck.mockResolvedValue(
+    ok({
+      path: 'memory/demo.md',
+      type: 'Note',
+      generated: false,
+      verified: false,
+      issues: [{ level: 'warn', code: 'missing-type', message: '缺少 type' }],
+    }),
+  );
   mock.memory.retire.mockResolvedValue(ok(makeMemoryEntry({ lifecycle: 'retired', content: 'x' })));
   mock.memory.edit.mockResolvedValue(ok(makeMemoryEntry({ lifecycle: 'active', confirmedAt: 9, content: 'x' })));
   mock.memory.search.mockResolvedValue(ok([]));
+  mock.session.list.mockResolvedValue(
+    ok([{ id: 'sess-1', cwd: '/test/workspace', path: '/tmp/sess.jsonl', created: new Date(), modified: new Date(), messageCount: 1, firstMessage: 'hi' }]),
+  );
 }
 
 let mock: MemoryLorraMock;
@@ -311,6 +361,21 @@ describe('MemoryPage(三栏工作台 + 操作)', () => {
     expect(within(activeZone).getByText('搜索结果条目')).toBeInTheDocument();
   });
 
+  it('右栏显示 core / working / archival 审计，并对 OFK 文档展示 OKF 提示', async () => {
+    const fx = makeFixture();
+    fx.active[0] = { ...fx.active[0], ofkRef: 'memory/demo.md' };
+    seedMock(mock, fx);
+    render(<MemoryPage />);
+
+    await waitLoaded();
+    expect(screen.getByTestId('memory-core-audit').textContent).toContain('来源 1 条');
+    expect(screen.getByTestId('memory-core-audit').textContent).toContain('test');
+    expect(screen.getByTestId('memory-session-audit').textContent).toContain('完成分层记忆');
+    expect(screen.getByTestId('memory-session-audit').textContent).toContain('history');
+    await waitFor(() => expect(mock.memory.okfCheck).toHaveBeenCalledWith('memory/demo.md'));
+    expect(screen.getByTestId('memory-okf-audit').textContent).toContain('缺少 type');
+  });
+
   it('中栏只渲染生效条目;归档折叠进左栏灰态行,展开可见且只读', async () => {
     const fx = makeFixture();
     seedMock(mock, fx);
@@ -402,10 +467,10 @@ describe('MemoryPage(三栏工作台 + 操作)', () => {
 
   it('加载态:首次拉取未返回前显示 loading', () => {
     seedMock(mock, makeFixture());
-    let resolveActive: (v: LorraResult<MemoryEntry[]>) => void = () => {};
+    let resolveActive: (v: SerializedResult<MemoryEntry[]>) => void = () => {};
     mock.memory.listActive.mockImplementation(
       () =>
-        new Promise<LorraResult<MemoryEntry[]>>((resolve) => {
+        new Promise<SerializedResult<MemoryEntry[]>>((resolve) => {
           resolveActive = resolve;
         }),
     );

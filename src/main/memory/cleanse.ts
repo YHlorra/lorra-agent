@@ -22,8 +22,9 @@ export interface RawSessionEntry {
     /** SDK assistant 消息附带的 token 用量(缺省视为 0)。 */
     usage?: { totalTokens?: number };
   };
-  /** SDK model_change 条目:provider + modelId(拼接为 'provider/modelId')。 */
-  modelChange?: { provider: string; modelId: string };
+  /** SDK model_change 条目:统一为 'provider/modelId' 字符串(2026-08-14 起
+ * 兼容 model 单字段新形状;旧 provider+modelId 形状在 collector 层归一)。 */
+  modelChange?: { model: string };
 }
 
 /** title = 首条 user 消息截断的定长(前缀保留 + 长度变短 + 确定性)。 */
@@ -101,14 +102,8 @@ export function cleanseSession(
   const seenTools: string[] = [];
   for (const entry of path) {
     const mc = entry.modelChange;
-    if (
-      mc &&
-      typeof mc.provider === 'string' &&
-      mc.provider &&
-      typeof mc.modelId === 'string' &&
-      mc.modelId
-    ) {
-      model = `${mc.provider}/${mc.modelId}`;
+    if (mc && typeof mc.model === 'string' && mc.model) {
+      model = mc.model;
     }
   }
   for (const entry of sequence) {

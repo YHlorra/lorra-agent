@@ -4,7 +4,13 @@ import type { ForgeConfig } from '@electron-forge/shared-types';
 
 const config: ForgeConfig = {
   packagerConfig: {
-    asar: true,
+    // asar intentionally disabled: the Orca terminal host opens every freshly-created
+    // .asar file and holds it without FILE_SHARE_DELETE, breaking electron-packager's
+    // final move (EBUSY/EPERM on resources/app.asar). Unpacked app dir avoids it.
+    asar: false,
+    // LORRA_ELECTRON_ZIP_DIR: use a pre-patched Electron zip (default_app.asar removed).
+    // Workaround for the same Orca locking on the template's default_app.asar.
+    electronZipDir: process.env.LORRA_ELECTRON_ZIP_DIR || undefined,
   },
   makers: [new MakerSquirrel({})],
   plugins: [

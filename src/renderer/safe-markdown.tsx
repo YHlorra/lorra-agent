@@ -20,8 +20,9 @@ import { MermaidBlock } from './mermaid-block';
 const safeMarkdownComponents: Components = {
   a: ({ node, href, children, ...props }) => {
     const safe = href && /^(https?:\/\/|mailto:|#|\/)/i.test(href);
+    // data-href 保留原文目标(含被消毒掉的相对路径),供 document-viewer Ctrl+点击事件委托导航。
     return (
-      <a href={safe ? href : undefined} {...props}>
+      <a href={safe ? href : undefined} data-href={href ?? undefined} {...props}>
         {children}
       </a>
     );
@@ -30,6 +31,19 @@ const safeMarkdownComponents: Components = {
     const safe = src && (/^https?:\/\//i.test(src) || /^\.{1,2}\//.test(src));
     return <img src={safe ? src : undefined} alt={alt ?? ''} {...props} />;
   },
+};
+
+/** chat 变体表格:包一层内部横向滚动容器,列保持自然宽度,不撑破对话列(Codex 式)。 */
+const ChatTable: Components['table'] = ({ children, ...props }) => (
+  <div className="md-table-wrap">
+    <table {...props}>{children}</table>
+  </div>
+);
+
+/** chat 变体组件表:共用消毒 + 表格内部滚动覆写(document 变体不受影响)。 */
+const chatComponents: Components = {
+  ...safeMarkdownComponents,
+  table: ChatTable,
 };
 
 /** 从渲染子节点递归收集纯文本(代码块覆写取原文用)。 */
@@ -110,7 +124,7 @@ export function SafeMarkdown({
     : {
         remarkPlugins: [remarkGfm],
         rehypePlugins: [rehypeHighlight],
-        components: safeMarkdownComponents,
+        components: chatComponents,
       };
   return (
     <div className={cls}>

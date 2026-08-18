@@ -24,6 +24,7 @@ description: 每日知识库摘要编译:把当日会话分类并生成工作摘
 {
   "date": "YYYY-MM-DD",
   "workspace": "<ws-slug>",
+  "tags": ["工作", "编程", "阅读", "闲聊", "项目"],
   "sessions": [
     {
       "sessionRef": "<会话标识>",
@@ -48,25 +49,25 @@ description: 每日知识库摘要编译:把当日会话分类并生成工作摘
 \`\`\`json
 {
   "categoryBySession": {
-    "<sessionRef>": "<work|programming|reading|chat|project|uncategorized>"
+    "<sessionRef>": "<tags 列表中的一个>"
   },
   "segmentsBySession": {
     "<sessionRef>": [
-      { "category": "reading", "start": "<ISO>", "end": "<ISO>", "summary": "<一句话摘要>" }
+      { "category": "<tags 列表中的一个>", "start": "<ISO>", "end": "<ISO>", "summary": "<一句话摘要>" }
     ]
+  },
+  "summaryBySession": {
+    "<sessionRef>": "<整会话一句话归纳(做了什么、结果如何,≤60 字,不复述用户原话)"
   },
   "digest": "<markdown 摘要>"
 }
 \`\`\`
 
-## 六分类判定规则
+## 标签判定规则
 
-- work:工作任务、会议、项目推进、业务讨论
-- programming:写代码、调试、重构、技术方案、代码评审
-- reading:读文章、读文档、读代码、学习资料
-- chat:闲聊、答疑、日常对话(无明确产出)
-- project:与某个具体项目强绑定的长期事项(跨会话上下文)
-- uncategorized:以上都不像或信息不足
+- 输入 JSON 的 tags 字段给出当前可用的标签列表;为每个会话从列表里选**最贴切的一个**
+- 若没有一个标签像 → 输出「未分类」(该值不需要在 tags 列表里)
+- 段内 category 同此规则(同会话主题转换时逐段选最贴切标签)
 
 ## 语义分段规则
 
@@ -74,6 +75,8 @@ description: 每日知识库摘要编译:把当日会话分类并生成工作摘
 - 单主题短会话 = 单段或省略(不切)
 - 段首尾相接、不要重叠、不要留空档;每段 summary 一句话
 - segmentsBySession 可省略(全部单主题时);每段必须落在该会话 start/end 范围内
+- summaryBySession 对每个会话都要给:用你自己的话归纳整会话(主题 + 关键动作 + 结果),
+  禁止照抄用户提示词原文;该归纳会作为时间线块的标题展示
 
 ## 摘要写法
 

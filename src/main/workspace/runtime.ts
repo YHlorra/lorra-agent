@@ -7,6 +7,7 @@ import { createOfkHotSyncer } from '../ofk/ofk-hot-syncer';
 import type { LorraDriver } from '../pi-sdk-driver';
 import { LorraDriver as LorraDriverImpl } from '../pi-sdk-driver';
 import { createSessionPersistence } from '../pi-sdk-driver/session-persistence';
+import { seedLorraMetaSkill } from '../skills/skill-meta-seed';
 
 /**
  * 会话自动记忆提取总开关:false 时 onSessionActivity 只跑事实
@@ -119,6 +120,8 @@ export function createWorkspaceRuntime(): WorkspaceRuntime {
       seedMemoryMaintenanceSkill(workspacePath);
       // OFK 摘要编译技能播种:同 write-if-missing 纪律,失败静默。
       seedOfkDigestSkill(workspacePath);
+      // lorra 元技能播种(可发现,用户经 /skill lorra-meta-skill 调用):失败静默,不阻塞激活。
+      seedLorraMetaSkill(workspacePath);
       const persistence = await createSessionPersistence({
         workspacePath,
         // Chromium network stack (system trust store + proxy handling);

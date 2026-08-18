@@ -70,6 +70,10 @@ import {
   MEMORY_CHANNEL_DIGEST_FILE,
   MEMORY_CHANNEL_DIGEST_TEXT,
   MEMORY_CHANNEL_EDIT,
+  MEMORY_CHANNEL_GET_ARCHIVAL_AUDIT,
+  MEMORY_CHANNEL_GET_CORE_PROJECTION,
+  MEMORY_CHANNEL_GET_EXPERIENCE_AUDIT,
+  MEMORY_CHANNEL_GET_WORKING_MEMORY,
   MEMORY_CHANNEL_LIST_ACTIVE,
   MEMORY_CHANNEL_LIST_ARCHIVED,
   MEMORY_CHANNEL_LIST_EVENTS,
@@ -83,8 +87,8 @@ import {
   type MemoryEvent,
 } from '../../src/shared/memory-schema';
 
-type OkRes<T> = { status: 'ok'; value: T };
-type ErrRes = { status: 'error'; error: { code: string; message: string } };
+type OkRes<T> = { ok: true; value: T };
+type ErrRes = { ok: false; error: { code: string; message: string } };
 type IpcRes<T> = OkRes<T> | ErrRes;
 
 async function invoke<T>(channel: string, args?: unknown): Promise<IpcRes<T>> {
@@ -94,7 +98,7 @@ async function invoke<T>(channel: string, args?: unknown): Promise<IpcRes<T>> {
 }
 
 function okOf<T>(res: IpcRes<T>): T {
-  expect(res.status).toBe('ok');
+  expect(res.ok).toBe(true);
   return (res as OkRes<T>).value;
 }
 
@@ -126,6 +130,52 @@ function seedEntry(store: MemoryStore, over: Partial<Record<string, unknown>> = 
 
 describe('memory-ipc(真 store + 临时库)', () => {
   let userdata: string;
+  const driverStub = {
+    getCoreProjection: vi.fn(() => ({
+      text: '- [workspace_identity] 当前工作区：demo',
+      workspaceIdentity: 'demo',
+      entryIds: ['core-1'],
+    })),
+    getWorkingMemory: vi.fn((sessionId: string) =>
+      sessionId === 's-1'
+        ? {
+            goal: '完成 P3',
+            constraints: ['最小 diff'],
+            openLoops: [],
+            recentCorrections: [],
+            recentDecisions: [],
+            pendingFacts: [],
+            updatedAt: 123,
+          }
+        : null,
+    ),
+    getLastArchivalAudit: vi.fn((sessionId: string) =>
+      sessionId === 's-1'
+        ? {
+            reason: '用户在追问历史决策或既有事实',
+            triggeredBy: 'history',
+            sources: ['memory', 'ofk'],
+            query: '之前怎么定的',
+            memoryEntryIds: ['mem-1'],
+            ofkPaths: ['memory/mem-1.md'],
+            text: '- [working_context] 历史决定：xxx',
+            updatedAt: 456,
+          }
+        : null,
+    ),
+    getExperienceAudit: vi.fn((nameOrId: string) =>
+      nameOrId === 'generated-skill'
+        ? {
+            skillName: 'generated-skill',
+            generated: true,
+            filePath: 'C:/ws/.lorra/skills/generated/generated-skill/SKILL.md',
+            caseIds: ['case-1'],
+            entryIds: ['mem-1'],
+            warnings: [],
+          }
+        : null,
+    ),
+  };
 
   beforeEach(() => {
     seedSeq = 0;
@@ -134,10 +184,17 @@ describe('memory-ipc(真 store + 临时库)', () => {
     vi.stubEnv('LORRA_E2E_USERDATA', userdata);
     electronMock.handlers.clear();
     // 6.13:消化/结晶通道注入 workspace 当前值(参照 fs-ipc 的 getter 模式)。
-    registerMemoryIpc({ getActiveWorkspacePath: () => 'ws-test' });
+    registerMemoryIpc({
+      getActiveWorkspacePath: () => 'ws-test',
+      getActiveDriver: () => driverStub as never,
+    });
     digestionMock.digestMaterial.mockReset();
     digestionMock.digestFile.mockReset();
     digestionMock.crystallize.mockReset();
+    driverStub.getCoreProjection.mockClear();
+    driverStub.getWorkingMemory.mockClear();
+    driverStub.getLastArchivalAudit.mockClear();
+    driverStub.getExperienceAudit.mockClear();
   });
 
   afterEach(() => {
@@ -166,6 +223,10 @@ describe('memory-ipc(真 store + 临时库)', () => {
       MEMORY_CHANNEL_DIGEST_TEXT,
       MEMORY_CHANNEL_DIGEST_FILE,
       MEMORY_CHANNEL_CRYSTALLIZE,
+      MEMORY_CHANNEL_GET_CORE_PROJECTION,
+      MEMORY_CHANNEL_GET_WORKING_MEMORY,
+      MEMORY_CHANNEL_GET_ARCHIVAL_AUDIT,
+      MEMORY_CHANNEL_GET_EXPERIENCE_AUDIT,
     ];
     for (const ch of channels) {
       expect(electronMock.handlers.has(ch)).toBe(true);
@@ -251,7 +312,7 @@ describe('memory-ipc(真 store + 临时库)', () => {
       content: '新内容 v2',
       basis: '用户澄清后的依据',
     });
-    expect(res.status).toBe('ok');
+    expect(res.ok).toBe(true);
     const edited = (res as OkRes<MemoryEntry>).value;
 
     // 新条目:active + supersedes 链 + 继承(update 语义)。
@@ -285,7 +346,7 @@ describe('memory-ipc(真 store + 临时库)', () => {
     const seeded = seedEntry(store());
 
     const res = await invoke<MemoryEntry>(MEMORY_CHANNEL_RETIRE, { entryId: seeded.entryId });
-    expect(res.status).toBe('ok');
+    expect(res.ok).toBe(true);
     expect((res as OkRes<MemoryEntry>).value.lifecycle).toBe('retired');
 
     const archived = okOf<MemoryEntry[]>(await invoke(MEMORY_CHANNEL_LIST_ARCHIVED));
@@ -345,11 +406,11 @@ describe('memory-ipc(真 store + 临时库)', () => {
       title: 't',
       content: 'c',
     });
-    expect(editRes.status).toBe('error');
+    expect(editRes.ok).toBe(false);
     expect((editRes as ErrRes).error.code).toBe('not-found');
 
     const retireRes = await invoke<MemoryEntry>(MEMORY_CHANNEL_RETIRE, { entryId: 'missing' });
-    expect(retireRes.status).toBe('error');
+    expect(retireRes.ok).toBe(false);
     expect((retireRes as ErrRes).error.code).toBe('not-found');
   });
 
@@ -359,7 +420,7 @@ describe('memory-ipc(真 store + 临时库)', () => {
 
     // 已 retired 再 retire → invalid-state。
     const again = await invoke<MemoryEntry>(MEMORY_CHANNEL_RETIRE, { entryId: seeded.entryId });
-    expect(again.status).toBe('error');
+    expect(again.ok).toBe(false);
     expect((again as ErrRes).error.code).toBe('invalid-state');
 
     // 超长内容 edit → content-too-long。
@@ -369,7 +430,7 @@ describe('memory-ipc(真 store + 临时库)', () => {
       title: '超长',
       content: 'x'.repeat(3000), // > MEMORY_CONTENT_MAX_BYTES(2048)
     });
-    expect(tooLong.status).toBe('error');
+    expect(tooLong.ok).toBe(false);
     expect((tooLong as ErrRes).error.code).toBe('content-too-long');
   });
 
@@ -391,6 +452,34 @@ describe('memory-ipc(真 store + 临时库)', () => {
     expect(links).toEqual([{ fromId: a.entryId, toId: b.entryId }]);
   });
 
+  it('分层记忆审计通道直出 active driver 的只读投影', async () => {
+    const core = okOf<{ workspaceIdentity: string; entryIds: string[] }>(
+      await invoke(MEMORY_CHANNEL_GET_CORE_PROJECTION),
+    );
+    expect(core.workspaceIdentity).toBe('demo');
+    expect(core.entryIds).toEqual(['core-1']);
+    expect(driverStub.getCoreProjection).toHaveBeenCalledTimes(1);
+
+    const working = okOf<{ goal?: string } | null>(
+      await invoke(MEMORY_CHANNEL_GET_WORKING_MEMORY, { sessionId: 's-1' }),
+    );
+    expect(working?.goal).toBe('完成 P3');
+    expect(driverStub.getWorkingMemory).toHaveBeenCalledWith('s-1');
+
+    const archival = okOf<{ triggeredBy: string; query?: string } | null>(
+      await invoke(MEMORY_CHANNEL_GET_ARCHIVAL_AUDIT, { sessionId: 's-1' }),
+    );
+    expect(archival?.triggeredBy).toBe('history');
+    expect(archival?.query).toBe('之前怎么定的');
+    expect(driverStub.getLastArchivalAudit).toHaveBeenCalledWith('s-1');
+
+    const experience = okOf<{ skillName: string } | null>(
+      await invoke(MEMORY_CHANNEL_GET_EXPERIENCE_AUDIT, { nameOrId: 'generated-skill' }),
+    );
+    expect(experience?.skillName).toBe('generated-skill');
+    expect(driverStub.getExperienceAudit).toHaveBeenCalledWith('generated-skill');
+  });
+
   // -------------------------------------------------------------------------
   // 6.13 素材消化 + 用户结晶:三通道注册 + 参数/错误码直通(mock 提取器注入)。
   // 真实提取逻辑由 material-digestion.test.ts 覆盖,这里只钉 IPC 薄层契约。
@@ -403,7 +492,7 @@ describe('memory-ipc(真 store + 临时库)', () => {
       text: '素材正文',
       title: '素材标题',
     });
-    expect(res.status).toBe('ok');
+    expect(res.ok).toBe(true);
     expect((res as OkRes<{ entryId: string }>).value).toEqual({ entryId: 'e1' });
     expect(digestionMock.digestMaterial).toHaveBeenCalledWith({
       text: '素材正文',
@@ -417,14 +506,14 @@ describe('memory-ipc(真 store + 临时库)', () => {
       err({ code: 'model-unavailable', message: '未配置可用模型' }),
     );
     const res1 = await invoke(MEMORY_CHANNEL_DIGEST_TEXT, { text: 'x' });
-    expect(res1.status).toBe('error');
+    expect(res1.ok).toBe(false);
     expect((res1 as ErrRes).error.code).toBe('model-unavailable');
 
     digestionMock.digestMaterial.mockResolvedValue(
       err({ code: 'digest-timed-out', message: '素材消化超时,请重试' }),
     );
     const res2 = await invoke(MEMORY_CHANNEL_DIGEST_TEXT, { text: 'x' });
-    expect(res2.status).toBe('error');
+    expect(res2.ok).toBe(false);
     expect((res2 as ErrRes).error.code).toBe('digest-timed-out');
   });
 
@@ -434,7 +523,7 @@ describe('memory-ipc(真 store + 临时库)', () => {
     const res = await invoke<{ entryId: string }>(MEMORY_CHANNEL_DIGEST_FILE, {
       filePath: 'C:\\tmp\\notes.md',
     });
-    expect(res.status).toBe('ok');
+    expect(res.ok).toBe(true);
     expect((res as OkRes<{ entryId: string }>).value).toEqual({ entryId: 'e2' });
     expect(digestionMock.digestFile).toHaveBeenCalledWith('C:\\tmp\\notes.md', {
       workspace: 'ws-test',
@@ -444,7 +533,7 @@ describe('memory-ipc(真 store + 临时库)', () => {
   it('digest-file:错误码直通(not-found)', async () => {
     digestionMock.digestFile.mockResolvedValue(err({ code: 'not-found', message: '文件不存在' }));
     const res = await invoke(MEMORY_CHANNEL_DIGEST_FILE, { filePath: 'C:\\tmp\\missing.md' });
-    expect(res.status).toBe('error');
+    expect(res.ok).toBe(false);
     expect((res as ErrRes).error.code).toBe('not-found');
   });
 
@@ -454,7 +543,7 @@ describe('memory-ipc(真 store + 临时库)', () => {
       content: '记住这段',
       title: '标题',
     });
-    expect(okRes.status).toBe('ok');
+    expect(okRes.ok).toBe(true);
     expect((okRes as OkRes<{ entryId: string }>).value).toEqual({ entryId: 'e3' });
     expect(digestionMock.crystallize).toHaveBeenCalledWith({
       content: '记住这段',
@@ -466,7 +555,7 @@ describe('memory-ipc(真 store + 临时库)', () => {
       err({ code: 'content-too-long', message: 'content exceeds 2048 bytes' }),
     );
     const errRes = await invoke(MEMORY_CHANNEL_CRYSTALLIZE, { content: 'x'.repeat(3000) });
-    expect(errRes.status).toBe('error');
+    expect(errRes.ok).toBe(false);
     expect((errRes as ErrRes).error.code).toBe('content-too-long');
   });
 });
@@ -488,43 +577,43 @@ describe('lorra.knowledge.read（）', () => {
     expect(written.isOk()).toBe(true);
 
     const okRes = (await handler(null, { path: 'memory/e1.md' })) as {
-      status: string;
+      ok: true;
       value?: { content: string | null };
       error?: { code: string };
     };
-    expect(okRes.status).toBe('ok');
+    expect(okRes.ok).toBe(true);
     expect(okRes.value?.content).toContain('# 文档正文');
 
     // canonical ofkRef 形态:迁移/工具产出的指针带前导 /(/memory/<id>.md),
     // 读取边界必须接受该形态(否则「查看文档」链路全断)
     const slashRes = (await handler(null, { path: '/memory/e1.md' })) as {
-      status: string;
+      ok: true;
       value?: { content: string | null };
       error?: { code: string };
     };
-    expect(slashRes.status).toBe('ok');
+    expect(slashRes.ok).toBe(true);
     expect(slashRes.value?.content).toContain('# 文档正文');
 
     const missing = (await handler(null, { path: 'memory/none.md' })) as {
-      status: string;
+      ok: true;
       value?: { content: string | null };
     };
-    expect(missing.status).toBe('ok');
+    expect(missing.ok).toBe(true);
     expect(missing.value?.content).toBeNull();
 
     const traversal = (await handler(null, { path: '../escape.md' })) as {
-      status: string;
+      ok: false;
       error?: { code: string };
     };
-    expect(traversal.status).toBe('error');
+    expect(traversal.ok).toBe(false);
     expect(traversal.error?.code).toBe('ofk-path-invalid');
 
     // 前导斜杠剥除后仍是穿越 → 同样拒绝
     const slashTraversal = (await handler(null, { path: '/../escape.md' })) as {
-      status: string;
+      ok: false;
       error?: { code: string };
     };
-    expect(slashTraversal.status).toBe('error');
+    expect(slashTraversal.ok).toBe(false);
     expect(slashTraversal.error?.code).toBe('ofk-path-invalid');
   });
 });

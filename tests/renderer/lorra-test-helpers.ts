@@ -50,6 +50,16 @@ export interface LorraMock {
     updateAll: Mock;
     setWsEnabled: Mock;
   };
+  agentPlugins: {
+    xray: Mock;
+    setPluginEnabled: Mock;
+    mcpAdd: Mock;
+    mcpRemove: Mock;
+    mcpSetEnabled: Mock;
+    mcpTest: Mock;
+    importFolder: Mock;
+    create: Mock;
+  };
 }
 
 export function makeLorraMock(): LorraMock {
@@ -120,11 +130,11 @@ export function makeLorraMock(): LorraMock {
       generate: vi.fn(() => ok({ id: 'rev-test' })),
     },
     // 技能管理页(skill-manager V1):信封 = 生产 SerializedResult(与 preload
-    // 直透同款 {status:'ok'}),页面测试据此判别;默认空 xray。
+    // 直透同款 {ok:true}),页面测试据此判别;默认空 xray。
     skills: {
       xray: vi.fn(() =>
         Promise.resolve({
-          status: 'ok' as const,
+          ok: true as const,
           value: {
             skills: [],
             stats: {},
@@ -143,19 +153,40 @@ export function makeLorraMock(): LorraMock {
           },
         }),
       ),
-      setEnabled: vi.fn(() => Promise.resolve({ status: 'ok' as const, value: undefined })),
-      cleanDangling: vi.fn(() => Promise.resolve({ status: 'ok' as const, value: { cleaned: 0 } })),
+      setEnabled: vi.fn(() => Promise.resolve({ ok: true as const, value: undefined })),
+      cleanDangling: vi.fn(() => Promise.resolve({ ok: true as const, value: { cleaned: 0 } })),
       collect: vi.fn(() =>
         Promise.resolve({
-          status: 'ok' as const,
+          ok: true as const,
           value: { moved: 0, linked: 0, conflicts: [], notes: [] },
         }),
       ),
-      checkUpdates: vi.fn(() => Promise.resolve({ status: 'ok' as const, value: {} })),
+      checkUpdates: vi.fn(() => Promise.resolve({ ok: true as const, value: {} })),
       updateAll: vi.fn(() =>
-        Promise.resolve({ status: 'ok' as const, value: { updated: [], skipped: [] } }),
+        Promise.resolve({ ok: true as const, value: { updated: [], skipped: [] } }),
       ),
-      setWsEnabled: vi.fn(() => Promise.resolve({ status: 'ok' as const, value: undefined })),
+      setWsEnabled: vi.fn(() => Promise.resolve({ ok: true as const, value: undefined })),
+    },
+    // 插件页(plan S5):agentPlugins 信封 = SerializedResult 直透;默认空 xray。
+    agentPlugins: {
+      xray: vi.fn(() =>
+        Promise.resolve({
+          ok: true as const,
+          value: { plugins: [], mcps: [], root: '/test/plugins', workspacePath: '/test/workspace' },
+        }),
+      ),
+      setPluginEnabled: vi.fn(() => Promise.resolve({ ok: true as const, value: undefined })),
+      mcpAdd: vi.fn(() => Promise.resolve({ ok: true as const, value: undefined })),
+      mcpRemove: vi.fn(() => Promise.resolve({ ok: true as const, value: undefined })),
+      mcpSetEnabled: vi.fn(() => Promise.resolve({ ok: true as const, value: undefined })),
+      mcpTest: vi.fn(() => Promise.resolve({ ok: true as const, value: { id: '', ok: false } })),
+      importFolder: vi.fn(() =>
+        Promise.resolve({
+          ok: true as const,
+          value: { name: 'p', path: '/p', skillCount: 0, mcpCount: 0 },
+        }),
+      ),
+      create: vi.fn(() => Promise.resolve({ ok: true as const, value: { name: 'p', path: '/p' } })),
     },
   };
 }

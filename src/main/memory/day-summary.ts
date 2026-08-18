@@ -1,6 +1,5 @@
 import type { SessionFact } from '../../shared/facts-schema';
-import type { SessionCategory, TimelineSegment } from '../../shared/ofk-schema';
-import { SESSION_CATEGORY_LABELS } from '../../shared/ofk-schema';
+import type { TimelineSegment } from '../../shared/ofk-schema';
 
 /**
  * 今日页只读投影类型与工作区着色工具(合并解读层):
@@ -20,9 +19,9 @@ export interface TodayWorkspaceStat {
   totalActiveMs: number;
 }
 
-/** 大类分区统计(plan D1/P1 step 5):按 SESSION_CATEGORIES 序,仅非空。 */
+/** 标签统计(2026-08-14 标签分类改造):category = tag 字符串;label 恒等于 category。 */
 export interface TodayCategoryStat {
-  category: SessionCategory;
+  category: string;
   label: string;
   count: number;
   totalActiveMs: number;
@@ -55,11 +54,6 @@ export function workspaceColor(name: string): string {
     hash = (hash * 31 + name.charCodeAt(i)) >>> 0;
   }
   return WORKSPACE_COLORS[hash % WORKSPACE_COLORS.length];
-}
-
-/** 大类中文标签取值(聚合与页面共用,避免两处常量漂移)。 */
-export function categoryLabel(category: SessionCategory): string {
-  return SESSION_CATEGORY_LABELS[category];
 }
 
 /** 本地日键 YYYY-MM-DD(queryDay 的日期键按本地日对齐)。 */

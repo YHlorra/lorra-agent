@@ -1,8 +1,14 @@
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { describe, expect, it, type Mock, vi } from 'vitest';
+import { beforeEach, describe, expect, it, type Mock, vi } from 'vitest';
 import type { Annotation, AnnotationDraft } from '../shared/annotations';
 import { DocumentViewer } from './document-viewer';
+
+// spy 跨用例隔离(与 App.test.tsx 同惯例):Ctrl+导航用例的 openExternal/resolveWikilink
+// 调用记录不得泄漏到无 Ctrl 用例,否则断言误红。
+beforeEach(() => {
+  vi.restoreAllMocks();
+});
 
 // mermaid 走动态 import:mock 掉,避免 jsdom 里真实加载 WebWorker 依赖。
 vi.mock('mermaid', () => ({
@@ -33,6 +39,7 @@ function renderViewer(over: {
   onAskAi?: Mock<(text: string) => void>;
   onSaveContent?: Mock<(content: string) => Promise<'saved' | 'conflict' | 'error'>>;
   onEditStateChange?: Mock<(editing: boolean) => void>;
+  onOpenFile?: Mock<(fileId: string) => void>;
 }) {
   const onAnnotate: Mock<(draft: AnnotationDraft) => void> = over.onAnnotate ?? vi.fn();
   const onRemoveAnnotation: Mock<(id: string) => void> = over.onRemoveAnnotation ?? vi.fn();
@@ -40,6 +47,7 @@ function renderViewer(over: {
   const onSaveContent: Mock<(content: string) => Promise<'saved' | 'conflict' | 'error'>> =
     over.onSaveContent ?? vi.fn().mockResolvedValue('saved');
   const onEditStateChange: Mock<(editing: boolean) => void> = over.onEditStateChange ?? vi.fn();
+  const onOpenFile: Mock<(fileId: string) => void> = over.onOpenFile ?? vi.fn();
   const utils = render(
     <DocumentViewer
       file={over.file ?? { status: 'ready', content: '正文内容' }}
@@ -51,9 +59,18 @@ function renderViewer(over: {
       onAskAi={onAskAi}
       onSaveContent={onSaveContent}
       onEditStateChange={onEditStateChange}
+      onOpenFile={onOpenFile}
     />,
   );
-  return { utils, onAnnotate, onRemoveAnnotation, onAskAi, onSaveContent, onEditStateChange };
+  return {
+    utils,
+    onAnnotate,
+    onRemoveAnnotation,
+    onAskAi,
+    onSaveContent,
+    onEditStateChange,
+    onOpenFile,
+  };
 }
 
 /** 模拟用户选中 document-content 内的一段文字(触发 SelectionToolbar 的 mouseup 检测)。 */
@@ -546,5 +563,155 @@ tags: [a]
     await selectTextInDocument('段落二');
     await user.click(screen.getByRole('button', { name: '高亮' }));
     expect(onAnnotate.mock.calls[0][0]).toMatchObject({ text: '段落二' });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 标题/tag 就地编辑(2026-08-17):点击标题/tag → 输入框 → Enter/blur 保存
+// (rewriteMetaFields 只 patch frontmatter 的 title/tags),Esc 取消,error 保留草稿。
+// ---------------------------------------------------------------------------
+
+describe('DocumentViewer 标题/tag 就地编辑', () => {
+  const DOC = `---
+title: 旧标题
+tags: [a, b]
+---
+
+# 旧标题
+
+正文
+`;
+
+  it('Given 点击标题 When 编辑并回车 Then 保存内容 frontmatter title 更新', async () => {
+    const user = userEvent.setup();
+    const { onSaveContent } = renderViewer({ file: { status: 'ready', content: DOC } });
+
+    await user.click(screen.getByRole('button', { name: '旧标题' }));
+    const input = await screen.findByRole('textbox', { name: '文档标题' });
+    await user.clear(input);
+    await user.type(input, '新标题');
+    await user.keyboard('{Enter}');
+
+    expect(onSaveContent).toHaveBeenCalledTimes(1);
+    expect(onSaveContent.mock.calls[0][0]).toContain('title: 新标题');
+    expect(onSaveContent.mock.calls[0][0]).toContain('tags: [a, b]');
+  });
+
+  it('Given 点击 tag When 编辑并回车 Then 保存内容 tags 数组更新(其余字段保留)', async () => {
+    const user = userEvent.setup();
+    const { onSaveContent } = renderViewer({ file: { status: 'ready', content: DOC } });
+
+    await user.click(screen.getByText('#a'));
+    const input = await screen.findByRole('textbox', { name: '标签' });
+    await user.clear(input);
+    await user.type(input, 'newtag');
+    await user.keyboard('{Enter}');
+
+    expect(onSaveContent).toHaveBeenCalledTimes(1);
+    expect(onSaveContent.mock.calls[0][0]).toContain('tags: [newtag, b]');
+    expect(onSaveContent.mock.calls[0][0]).toContain('title: 旧标题');
+  });
+
+  it('Given Esc 取消 When 编辑标题中 Then 不触发 onSaveContent 且输入框消失', async () => {
+    const user = userEvent.setup();
+    const { onSaveContent } = renderViewer({ file: { status: 'ready', content: DOC } });
+
+    await user.click(screen.getByRole('button', { name: '旧标题' }));
+    await screen.findByRole('textbox', { name: '文档标题' });
+    await user.keyboard('{Escape}');
+
+    expect(onSaveContent).not.toHaveBeenCalled();
+    expect(screen.queryByRole('textbox', { name: '文档标题' })).toBeNull();
+    expect(screen.getByRole('heading', { level: 1, name: '旧标题' })).toBeInTheDocument();
+  });
+
+  it('Given onSaveContent 返回 error When 保存标题 Then 编辑态保留(可重试)', async () => {
+    const user = userEvent.setup();
+    const { onSaveContent } = renderViewer({
+      file: { status: 'ready', content: DOC },
+      onSaveContent: vi.fn().mockResolvedValue('error'),
+    });
+
+    await user.click(screen.getByRole('button', { name: '旧标题' }));
+    const input = await screen.findByRole('textbox', { name: '文档标题' });
+    await user.type(input, '未保存的标题');
+    await user.keyboard('{Enter}');
+
+    await waitFor(() => expect(onSaveContent).toHaveBeenCalledTimes(1));
+    const stillThere = await screen.findByRole('textbox', { name: '文档标题' });
+    expect((stillThere as HTMLInputElement).value).toContain('未保存的标题');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Ctrl+点击导航(2026-08-17):双链 [[target]] → resolveWikilink → onOpenFile;
+// 外链 https/mailto → openExternal;相对/绝对路径 → onOpenFile。无 Ctrl 不导航。
+// ---------------------------------------------------------------------------
+
+describe('DocumentViewer Ctrl+点击导航', () => {
+  it('Given Ctrl+点击双链 When 目标存在 Then 调 resolveWikilink 并 onOpenFile', async () => {
+    const resolveWikilink = vi
+      .spyOn(window.lorra.fs, 'resolveWikilink')
+      .mockResolvedValue({ ok: true, value: { fileId: 'b.md' } });
+    const { onOpenFile } = renderViewer({
+      file: { status: 'ready', content: '# t\n\n见 [[b]] 页面\n' },
+    });
+
+    const wl = await screen.findByText('b');
+    fireEvent.click(wl, { ctrlKey: true });
+
+    await waitFor(() => expect(resolveWikilink).toHaveBeenCalledWith({ name: 'b' }));
+    expect(onOpenFile).toHaveBeenCalledWith('b.md');
+  });
+
+  it('Given Ctrl+点击双链 When 目标不存在 Then 提示「目标不存在」且不打开', async () => {
+    vi.spyOn(window.lorra.fs, 'resolveWikilink').mockResolvedValue({
+      ok: true,
+      value: { fileId: null },
+    });
+    const { onOpenFile } = renderViewer({
+      file: { status: 'ready', content: '# t\n\n见 [[gone]] 页面\n' },
+    });
+
+    fireEvent.click(await screen.findByText('gone'), { ctrlKey: true });
+
+    expect(await screen.findByText('目标不存在')).toBeInTheDocument();
+    expect(onOpenFile).not.toHaveBeenCalled();
+  });
+
+  it('Given Ctrl+点击外链 When 点击 Then 调 openExternal 且不进就地编辑', async () => {
+    const openExternal = vi.spyOn(window.lorra.app, 'openExternal').mockResolvedValue(true);
+    renderViewer({ file: { status: 'ready', content: '# t\n\n看 [官网](https://example.com)\n' } });
+
+    const link = await screen.findByRole('link', { name: '官网' });
+    fireEvent.click(link, { ctrlKey: true });
+
+    await waitFor(() => expect(openExternal).toHaveBeenCalledWith('https://example.com'));
+    expect(document.querySelector('.md-edit-input')).toBeNull();
+  });
+
+  it('Given Ctrl+点击相对路径链接 When 点击 Then onOpenFile(剥 ./ 前缀)', async () => {
+    const { onOpenFile } = renderViewer({
+      file: { status: 'ready', content: '# t\n\n去 [其他页](./other.md)\n' },
+    });
+
+    const link = await screen.findByText('其他页');
+    expect(link.closest('a')).toHaveAttribute('data-href', './other.md');
+    fireEvent.click(link, { ctrlKey: true });
+
+    expect(onOpenFile).toHaveBeenCalledWith('other.md');
+  });
+
+  it('Given 无 Ctrl 点击链接 When 点击 Then 不导航(capture 不拦截,保留正文就地编辑)', async () => {
+    const openExternal = vi.spyOn(window.lorra.app, 'openExternal').mockResolvedValue(true);
+    const { onOpenFile } = renderViewer({
+      file: { status: 'ready', content: '# t\n\n看 [官网](https://example.com)\n' },
+    });
+
+    const link = await screen.findByRole('link', { name: '官网' });
+    fireEvent.click(link);
+
+    expect(openExternal).not.toHaveBeenCalled();
+    expect(onOpenFile).not.toHaveBeenCalled();
   });
 });

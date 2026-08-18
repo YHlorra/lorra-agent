@@ -1,6 +1,9 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
+  buildCoreContext,
+  buildCoreProjection,
   buildRecallContext,
+  CORE_MEMORY_MAX_ITEMS,
   RECALL_CONTENT_MAX_CHARS,
   RECALL_CONTEXT_MARKER,
   stripRecallContext,
@@ -35,6 +38,10 @@ vi.mock('../../src/main/memory/shared-memory-store', () => ({
     return {
       isErr: () => false,
       value: {
+        listActive: () => {
+          if (fakeStore.failMode === 'throw') throw new Error('db gone');
+          return { isErr: () => false, value: fakeStore.entries };
+        },
         recall: (params: Record<string, unknown>) => {
           fakeStore.recallArgs.push(params);
           if (fakeStore.failMode === 'throw') throw new Error('db gone');
@@ -52,7 +59,7 @@ vi.mock('../../src/main/memory/shared-memory-store', () => ({
 
 function makeEntry(overrides: Partial<MemoryEntry> = {}): MemoryEntry {
   return {
-    entryId: 'id-' + (overrides.title ?? 'entry'),
+    entryId: `id-${overrides.title ?? 'entry'}`,
     schemaVersion: 1,
     tags: [],
     kind: 'working_context',
@@ -73,6 +80,83 @@ function makeEntry(overrides: Partial<MemoryEntry> = {}): MemoryEntry {
     ...overrides,
   };
 }
+
+describe('buildCoreContext(P1 常驻核心记忆)', () => {
+  beforeEach(() => {
+    fakeStore.entries = [];
+    fakeStore.recallArgs = [];
+    fakeStore.failMode = 'ok';
+  });
+
+  it('无核心记忆时仍注入工作区身份卡', () => {
+    expect(buildCoreContext('C:/work/demo')).toBe('- [workspace_identity] 当前工作区：demo');
+  });
+
+  it('core projection 回读来源: 返回 workspace identity 与 entry ids', () => {
+    fakeStore.entries = [
+      makeEntry({ entryId: 'pref-1', kind: 'soft_preference', title: '偏好-1', updatedAt: 1 }),
+      makeEntry({ entryId: 'policy-1', kind: 'hard_policy', title: '规则-1', updatedAt: 2 }),
+    ];
+
+    const projection = buildCoreProjection('C:/work/demo');
+
+    expect(projection.workspaceIdentity).toBe('demo');
+    expect(projection.entryIds).toEqual(['policy-1', 'pref-1']);
+    expect(projection.text).toContain('当前工作区：demo');
+    expect(projection.text).toContain('规则-1');
+    expect(projection.text).toContain('偏好-1');
+  });
+
+  it('只选 hard_policy / user_profile / soft_preference, 并按优先级排序', () => {
+    fakeStore.entries = [
+      makeEntry({ kind: 'knowledge', title: '知识页', updatedAt: 999 }),
+      makeEntry({ kind: 'soft_preference', title: '偏好', updatedAt: 10 }),
+      makeEntry({ kind: 'user_profile', title: '档案', updatedAt: 20 }),
+      makeEntry({ kind: 'hard_policy', title: '规则', updatedAt: 30 }),
+    ];
+
+    const block = buildCoreContext('C:/work/demo');
+
+    expect(block).toContain('当前工作区：demo');
+    expect(block).toContain('规则');
+    expect(block).toContain('档案');
+    expect(block).toContain('偏好');
+    expect(block).not.toContain('知识页');
+    expect(block.indexOf('规则')).toBeLessThan(block.indexOf('档案'));
+    expect(block.indexOf('档案')).toBeLessThan(block.indexOf('偏好'));
+  });
+
+  it('scope 过滤: user 级跨工作区保留, 其他工作区条目不进 core', () => {
+    fakeStore.entries = [
+      makeEntry({ kind: 'user_profile', title: '全局档案', scope: 'user', workspace: null }),
+      makeEntry({ kind: 'soft_preference', title: 'A 偏好', workspace: 'WA' }),
+      makeEntry({ kind: 'hard_policy', title: 'B 规则', workspace: 'WB' }),
+    ];
+
+    const block = buildCoreContext('WB');
+
+    expect(block).toContain('全局档案');
+    expect(block).toContain('B 规则');
+    expect(block).not.toContain('A 偏好');
+  });
+
+  it('超预算时只保留 CORE_MEMORY_MAX_ITEMS 条核心记忆', () => {
+    fakeStore.entries = Array.from({ length: CORE_MEMORY_MAX_ITEMS + 2 }, (_, index) =>
+      makeEntry({
+        kind: 'soft_preference',
+        title: `偏好-${index}`,
+        updatedAt: CORE_MEMORY_MAX_ITEMS + 2 - index,
+      }),
+    );
+
+    const block = buildCoreContext('C:/work/demo');
+    const lines = block.split('\n');
+
+    expect(lines).toHaveLength(CORE_MEMORY_MAX_ITEMS + 1);
+    expect(block).toContain('偏好-0');
+    expect(block).not.toContain(`偏好-${CORE_MEMORY_MAX_ITEMS + 1}`);
+  });
+});
 
 describe('buildRecallContext(design 6.6 召回注入组装)', () => {
   beforeEach(() => {
@@ -152,7 +236,7 @@ describe('buildRecallContext(design 6.6 召回注入组装)', () => {
     fakeStore.entries = [makeEntry({ content: longContent })];
     const block = buildRecallContext({ workspace: 'C:/work/demo' });
 
-    expect(block).toContain('长'.repeat(RECALL_CONTENT_MAX_CHARS) + '…');
+    expect(block).toContain(`${'长'.repeat(RECALL_CONTENT_MAX_CHARS)}…`);
     expect(block).not.toContain('长'.repeat(RECALL_CONTENT_MAX_CHARS + 1));
   });
 
@@ -169,7 +253,7 @@ describe('buildRecallContext(design 6.6 召回注入组装)', () => {
   });
 
   it('query 命中末段 → 注入含命中段(末段)而非首段, query 透传 recall', () => {
-    const longFirst = '首段内容' + '长'.repeat(RECALL_CONTENT_MAX_CHARS);
+    const longFirst = `首段内容${'长'.repeat(RECALL_CONTENT_MAX_CHARS)}`;
     const content = `${longFirst}\n\n中间段\n\n末段包含查询词 Kubernetes 部署`;
     fakeStore.entries = [makeEntry({ title: '长页', content })];
     const block = buildRecallContext({ workspace: 'C:/work/demo', query: 'Kubernetes' });
@@ -187,7 +271,7 @@ describe('buildRecallContext(design 6.6 召回注入组装)', () => {
   });
 
   it('query 无命中段 → 回退首段', () => {
-    const firstPara = '首段文字' + '长'.repeat(RECALL_CONTENT_MAX_CHARS);
+    const firstPara = `首段文字${'长'.repeat(RECALL_CONTENT_MAX_CHARS)}`;
     const content = `${firstPara}\n\n次段文字`;
     fakeStore.entries = [makeEntry({ title: '页', content })];
     const block = buildRecallContext({ workspace: 'C:/work/demo', query: '完全不存在' });
@@ -217,7 +301,7 @@ describe('buildRecallContext(design 6.6 召回注入组装)', () => {
   it('截断后仍超上限 → 段落尾部裁剪 + … 且无 U+FFFD(不切碎代理对)', () => {
     // 200 字符边界落在 astral 字符(𠀀 = 2 个 UTF-16 单元)中间:
     // 朴素 slice 会产生孤立代理, 编码后变 U+FFFD, 段落感知截断必须避免
-    const content = 'a'.repeat(RECALL_CONTENT_MAX_CHARS - 1) + '𠀀' + '尾';
+    const content = `${'a'.repeat(RECALL_CONTENT_MAX_CHARS - 1)}𠀀尾`;
     expect(content.length).toBeGreaterThan(RECALL_CONTENT_MAX_CHARS);
     fakeStore.entries = [makeEntry({ content })];
     const block = buildRecallContext({ workspace: 'C:/work/demo' });
