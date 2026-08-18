@@ -6,8 +6,13 @@ import { _electron as electron, expect, test } from '@playwright/test';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(__dirname, '../..');
-const userDataDir = () => path.join(repoRoot, 'node_modules', '.lorra-e2e-userdata');
-const workspaceDir = () => path.join(repoRoot, 'node_modules', '.lorra-e2e-workspace');
+// 每 worker 独立 userData/workspace:CI 默认多 worker 并行,若共用同一目录,
+// 并发测试的 rm -rf 会撞上另一测试正在运行的 Electron 锁定的 SQLite WAL
+// (EBUSY)或清掉其数据目录,导致 shell 永不渲染(实测 --workers=2 复现)。
+const userDataDir = () =>
+  path.join(repoRoot, 'node_modules', `.lorra-e2e-userdata-${test.info().workerIndex}`);
+const workspaceDir = () =>
+  path.join(repoRoot, 'node_modules', `.lorra-e2e-workspace-${test.info().workerIndex}`);
 
 /**
  * lorra E2E smoke — proves Electron loads main.js as ESM (no require errors)
