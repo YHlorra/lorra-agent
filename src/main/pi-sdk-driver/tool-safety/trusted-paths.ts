@@ -1,5 +1,5 @@
-import os from 'node:os';
 import { realpathSync } from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 
 export interface TrustedPathsOpts {

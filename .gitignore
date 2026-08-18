@@ -39,6 +39,8 @@ docs/codex/
 docs/pi-gui/
 docs/pi/
 docs/dsh/
+# 公开面红线:内部 docs 不入公开仓库;此处兜底忽略用户直放 open 的截图目录。
+docs/screenshots/
 hermes/
 # bd worktree
 settings-i18n/
