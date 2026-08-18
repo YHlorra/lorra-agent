@@ -48,6 +48,29 @@ const execFileAsync = promisify(execFile);
 /** 遍历器最大深度（防 symlink 环，skills-store 同款纪律）。 */
 const MAX_DEPTH = 32;
 
+/** fetch/status 并行上限（2026-08-18：原串行 N×30s 超时上限，UI 干等）。 */
+const GIT_STATUS_CONCURRENCY = 4;
+
+/** 限流并行 map：concurrency 个并发，顺序无关（结果按输入序）。 */
+async function mapLimit<T, R>(
+  items: T[],
+  concurrency: number,
+  fn: (item: T) => Promise<R>,
+): Promise<R[]> {
+  const out = new Array<R>(items.length);
+  let next = 0;
+  const workers = Array.from({ length: Math.min(concurrency, items.length) }, async () => {
+    for (;;) {
+      const i = next;
+      next += 1;
+      if (i >= items.length) return;
+      out[i] = await fn(items[i]);
+    }
+  });
+  await Promise.all(workers);
+  return out;
+}
+
 /** git 调用（超时 + ENOENT → git-unavailable）。 */
 function runGit(args: string[], cwd: string): Promise<Result<string>> {
   return ResultRuntime.tryPromise({
@@ -261,8 +284,13 @@ async function scanGitStatuses(
     return probe;
   }
   const out: Record<string, SkillGitStatus> = {};
-  for (const { dir } of gitDirs(collectionRoot)) {
-    out[skillNameOf(dir)] = await dirStatus(dir, doFetch);
+  const dirs = gitDirs(collectionRoot);
+  // 2026-08-18:并行 fetch(限流 4),原串行实现 N 个仓库 × 30s 超时会让 UI 干等。
+  const statuses = await mapLimit(dirs, GIT_STATUS_CONCURRENCY, async ({ dir }) =>
+    dirStatus(dir, doFetch),
+  );
+  for (let i = 0; i < dirs.length; i++) {
+    out[skillNameOf(dirs[i].dir)] = statuses[i];
   }
   return ok(out);
 }

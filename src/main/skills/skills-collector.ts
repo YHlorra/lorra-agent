@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import type { Dirent, Stats } from 'node:fs';
 import { existsSync, readFileSync, realpathSync, statSync, symlinkSync } from 'node:fs';
-import { cp, mkdir, readdir, rename, stat } from 'node:fs/promises';
+import { cp, mkdir, readdir, readFile, rename, stat } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { Result as ResultRuntime } from 'better-result';
@@ -119,8 +119,12 @@ async function dirsEquivalent(a: string, b: string): Promise<boolean> {
     try {
       const [sa, sb] = await Promise.all([stat(pa), stat(pb)]);
       if (sa.size !== sb.size) return false;
-      const sha = (p: string): string => createHash('sha256').update(readFileSync(p)).digest('hex');
-      if (sha(pa) !== sha(pb)) return false;
+      // 2026-08-18:同步 readFileSync → 异步 readFile(大技能树不再阻塞主进程事件循环)。
+      const sha = async (p: string): Promise<string> =>
+        createHash('sha256')
+          .update(await readFile(p))
+          .digest('hex');
+      if ((await sha(pa)) !== (await sha(pb))) return false;
     } catch {
       return false;
     }
@@ -133,8 +137,11 @@ async function filesEquivalent(a: string, b: string): Promise<boolean> {
   try {
     const [sa, sb] = await Promise.all([stat(a), stat(b)]);
     if (sa.size !== sb.size) return false;
-    const sha = (p: string): string => createHash('sha256').update(readFileSync(p)).digest('hex');
-    return sha(a) === sha(b);
+    const sha = async (p: string): Promise<string> =>
+      createHash('sha256')
+        .update(await readFile(p))
+        .digest('hex');
+    return (await sha(a)) === (await sha(b));
   } catch {
     return false;
   }
@@ -218,6 +225,30 @@ function isWithinCollection(real: string, collectionRootReal: string): boolean {
   return p === root || p.startsWith(rootWithSep);
 }
 
+/**
+ * 收集根内按技能名(frontmatter name)查找已有技能根目录;找不到 → null。
+ * 2026-08-18 修复:收集去重此前只按目录名判碰撞,frontmatter name 相同而目录名不同
+ * 会收集出两份同名技能(扫描端同名先到者胜,后一份静默丢失)。
+ */
+async function findCollectedDirByName(
+  collectionRoot: string,
+  displayName: string,
+): Promise<string | null> {
+  let entries: Dirent[];
+  try {
+    entries = await readdir(collectionRoot, { withFileTypes: true });
+  } catch {
+    return null;
+  }
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue;
+    const dir = path.join(collectionRoot, entry.name);
+    if (!existsSync(path.join(dir, 'SKILL.md'))) continue;
+    if (skillDisplayName(dir) === displayName) return dir;
+  }
+  return null;
+}
+
 /** 目录形技能收编：无同名 → 移动 + 原位建链；有同名 → 等价建链 / 不等价冲突。 */
 async function collectDirSkill(
   src: string,
@@ -228,6 +259,23 @@ async function collectDirSkill(
   const displayName = skillDisplayName(src);
   const dest = path.join(collectionRoot, basename);
   const linkedNote = `${displayName}：已收集但无法建链接`;
+  // 同名技能(frontmatter name)已存在且不是同一目录 → 等价建链 / 不等价冲突
+  // (2026-08-18 修复:此前只按目录名判碰撞,同名不同目录会收集出两份)。
+  const sameNameDir = await findCollectedDirByName(collectionRoot, displayName);
+  if (sameNameDir !== null && normKey(sameNameDir) !== normKey(dest)) {
+    if (await dirsEquivalent(src, sameNameDir)) {
+      await shell.trashItem(src);
+      try {
+        createLink(src, sameNameDir);
+      } catch {
+        result.notes.push(linkedNote);
+      }
+      result.linked += 1;
+    } else {
+      result.conflicts.push(`${displayName}：与原技能内容不同，保留原样`);
+    }
+    return;
+  }
   if (!existsSync(dest)) {
     await moveEntity(src, dest);
     result.moved += 1;

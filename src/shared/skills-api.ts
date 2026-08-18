@@ -179,6 +179,8 @@ export interface SkillXray {
   /** 技能收集根（默认 ~/.agents/skills，可在设置自定义）。 */
   collectionRoot: string;
   workspacePath: string;
+  /** 用户主目录（渲染端做 ~ 缩写展示；缺失时渲染端原样显示路径）。 */
+  homeDir?: string;
 }
 
 /** 技能文件内容（composer /skill 触发；content 为 SKILL.md/平铺 .md 原文，≤1MB）。 */

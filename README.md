@@ -57,7 +57,9 @@ Prerequisite: Node >= 22.19, npm (`package-lock.json` v3; no other package manag
 | `npx vitest run --config scripts/coverage-<side>.vitest.config.ts --coverage` | Coverage run (per-side config) |
 | `scripts/gauntlet-ofk.cmd` / `scripts/gauntlet-skills.cmd` | Fail-closed evidence gates: typecheck → baseline → biome → mutation → residual scan → e2e |
 
-No CI pipeline exists — run the gauntlets locally before release.
+CI runs on every push to `main` (GitHub Actions, `windows-latest`): typecheck → lint → unit/component tests → bundle build → real-Electron e2e (isolated profile) → Squirrel installer.
+
+[![CI](https://github.com/YHlorra/lorra-agent/actions/workflows/ci.yml/badge.svg)](https://github.com/YHlorra/lorra-agent/actions/workflows/ci.yml)
 
 ## License
 

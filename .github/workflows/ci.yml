@@ -1,0 +1,64 @@
+name: ci
+
+# 公开仓库(lorra-agent)CI:每次 sync-public 推送 main 后验证公开面可独立
+# 构建/测试/打包。约束:
+# - Windows-only:Playwright 起真实 Electron,e2e 必须 windows-latest
+# - 公开面不含 scripts/,本 workflow 只用根级 npm 脚本与 npx 命令
+# - 泄漏扫描由 sync-public.cmd 推送前执行(0 命中),此处不再重复
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# 单人作品仓库:连续 sync 推送时取消排队中的旧运行,省公共分钟
+concurrency:
+  group: ci-main
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Lint (Biome, non-mutating)
+        run: npx biome ci .
+
+      - name: Unit + component tests
+        run: npm test
+
+      - name: Build main bundle
+        run: npx vite build --config vite.main.config.ts
+
+      - name: Build preload bundle
+        run: npx vite build --config vite.preload.config.ts
+
+      - name: Build renderer bundle
+        run: npx vite build --config vite.renderer.config.ts
+
+      - name: e2e (real Electron, isolated userData)
+        env:
+          # 与 tests/main/test-env-setup.ts 同策略:任何 e2e 都触不到真实 ~/.lorra
+          LORRA_E2E_USERDATA: ${{ runner.temp }}\lorra-e2e-userdata
+        run: npm run test:e2e
+
+      - name: Package Squirrel installer
+        run: npx electron-forge make
+
+      - name: Upload installer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: lorra-windows-installer
+          path: out/make/squirrel.windows/x64/
+          if-no-files-found: error

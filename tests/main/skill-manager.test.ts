@@ -614,6 +614,7 @@ describe('setWorkspaceEnabled(按工作区停用名单)', () => {
   });
 
   it('停用 → workspaceSkillOverrides[wsRealpath] 加入该 name,持久化往返(重启读回)', async () => {
+    writeWorkspaceSkill(ws, 'alpha', 'alpha 描述');
     const res = await setWorkspaceEnabled('alpha', false);
     expect(res.isOk()).toBe(true);
     const settings = await readSettings();
@@ -625,15 +626,27 @@ describe('setWorkspaceEnabled(按工作区停用名单)', () => {
     expect(raw.workspaceSkillOverrides?.[wsReal]).toEqual(['alpha']);
   });
 
-  it('启用 → 从名单移除;不存在时为空操作成功', async () => {
+  it('启用 → 从名单移除;名单外已存在技能为空操作成功', async () => {
+    writeWorkspaceSkill(ws, 'alpha', 'alpha 描述');
+    writeWorkspaceSkill(ws, 'beta', 'beta 描述');
     unwrap(await setWorkspaceEnabled('alpha', false, ws));
     const res = await setWorkspaceEnabled('alpha', true, ws);
     expect(res.isOk()).toBe(true);
     expect((await readSettings()).workspaceSkillOverrides?.[wsReal]).toEqual([]);
 
-    // 不在名单 → 空操作成功。
-    const noop = await setWorkspaceEnabled('never-in-list', true, ws);
+    // 已存在技能但不在名单 → 空操作成功。
+    const noop = await setWorkspaceEnabled('beta', true, ws);
     expect(noop.isOk()).toBe(true);
+  });
+
+  it('name 不在发现集合 → err skill-not-found,名单不变(2026-08-18 补校验)', async () => {
+    const res = await setWorkspaceEnabled('never-in-list', false, ws);
+    expect(res.isErr()).toBe(true);
+    if (res.isErr()) {
+      expect(res.error.code).toBe('skill-not-found');
+      expect(res.error.message).toContain('技能不存在');
+    }
+    expect((await readSettings()).workspaceSkillOverrides?.[wsReal] ?? []).toEqual([]);
   });
 
   it('系统管理种子逐个拒绝(system-managed-skill),名单不变', async () => {

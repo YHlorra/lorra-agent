@@ -112,32 +112,7 @@ function fmtGap(ms: number, tr: Tr): string {
   return tr('today.gap.m', { m });
 }
 
-/**
- * 区间堆叠(interval partitioning):段按 start 升序(同 start 按 end 升序),
- * 贪心放入第一个可容纳的列(laneEnds[i] <= seg.start);返回每段的列号(0 起)。
- * 列数无上限(重叠列数即最大重叠深度)。不做任何相邻段合并(语义段是细分单元)。
- * 仅作为 layoutSection 的簇内分列原语 + 单测契约保留。
- */
-export function assignLanes(segments: TimelineSegment[]): number[] {
-  const sorted = segments
-    .map((seg, idx) => ({ seg, idx }))
-    .sort((a, b) => a.seg.start - b.seg.start || a.seg.end - b.seg.end);
-  const laneEnds: number[] = [];
-  const laneOf = new Array<number>(segments.length);
-  for (const { seg, idx } of sorted) {
-    const free = laneEnds.findIndex((end) => end <= seg.start);
-    if (free === -1) {
-      laneEnds.push(seg.end);
-      laneOf[idx] = laneEnds.length - 1;
-    } else {
-      laneEnds[free] = seg.end;
-      laneOf[idx] = free;
-    }
-  }
-  return laneOf;
-}
-
-/** 分区内每块的最终几何:簇内列号/列数 + 下推后的 top/height(px,相对本分区轨道)。 */
+/** 分区内每块的最终几何:会话列号/列数 + 下推后的 top/height(px,相对本分区轨道)。 */
 export interface BlockLayout {
   lane: number;
   laneCount: number;
@@ -146,13 +121,15 @@ export interface BlockLayout {
 }
 
 /**
- * 局部簇分列 + 甘特列(2026-08-14 不重叠改造):
- * 第一遍按时间重叠切簇(段 start < 簇内最大 end 才并簇),簇内区间堆叠分列;
- * 列互相不相交:宽 = 100/laneCount − 缝、left = lane × 100/laneCount,
- * 跨列垂直重叠不再互相遮挡(截图级叠瓦根除);
+ * 会话分列(2026-08-17 按会话数量均分):每段一列,列号 = sessionRef 首次出现序
+ * (按 start 升序),列数 N = 当日不同会话数;宽 = 100/N − 缝、left = 列号 × 100/N,
+ * 列不相交(N=1 时单块宽 98% 占整行是公式自然结果,单会话无列可分)。
+ * 同一会话的多段共享同一列并纵向堆叠;跨会话列垂直重叠不互推(列水平不相交)。
  * 第二遍按时间序全局下推:height = max(时长高, 最小高),仅同 lane 前块底 + 缝
  * 超过本块时间位时下推留缝(只推不拉,最小高度撑出时段不越位)。
- * 未完成段(今天)延伸至当前时刻线 nowTop;历史日期 nowTop 传 null 按 activeMs。
+ * 未完成段(今天)延伸至当前时刻线 nowTop;完成段(今天)的最小高度延伸
+ * 不得越过当前时刻线(会越线时截断回自然时长高,线下方是未来);
+ * 历史日期 nowTop 传 null 按 activeMs。
  */
 export function layoutSection(
   segments: TimelineSegment[],
@@ -160,42 +137,31 @@ export function layoutSection(
 ): BlockLayout[] {
   const order = segments
     .map((seg, idx) => ({ seg, idx }))
-    .sort((a, b) => a.seg.start - b.seg.start || a.seg.end - b.seg.end);
-  const placed = new Array<{
-    cluster: number;
-    lane: number;
-    laneCount: number;
-    top0: number;
-    top: number;
-    height: number;
-  }>(segments.length);
-  let cluster: Array<{ seg: TimelineSegment; idx: number }> = [];
-  let clusterEnd = -Infinity;
-  let clusterId = -1;
-  const flush = (): void => {
-    if (cluster.length === 0) return;
-    clusterId += 1;
-    const lanes = assignLanes(cluster.map((c) => c.seg));
-    const laneCount = Math.max(...lanes) + 1;
-    cluster.forEach((c, k) => {
-      const top0 = (minutesOfDay(c.seg.start) * opts.pxPerHour) / 60;
-      const height =
-        c.seg.unfinished && opts.nowTop !== null
-          ? Math.max(opts.nowTop - top0, opts.minH)
-          : Math.max((c.seg.activeMs * opts.pxPerHour) / 3_600_000, opts.minH);
-      placed[c.idx] = { cluster: clusterId, lane: lanes[k], laneCount, top0, top: top0, height };
-    });
-    cluster = [];
-    clusterEnd = -Infinity;
-  };
-  for (const item of order) {
-    const startMin = minutesOfDay(item.seg.start);
-    if (cluster.length > 0 && startMin >= clusterEnd) flush();
-    cluster.push(item);
-    clusterEnd = Math.max(clusterEnd, minutesOfDay(item.seg.end));
+    .sort(
+      (a, b) =>
+        a.seg.start - b.seg.start ||
+        a.seg.end - b.seg.end ||
+        a.seg.sessionRef.localeCompare(b.seg.sessionRef),
+    );
+  const laneOf = new Map<string, number>();
+  for (const { seg } of order) {
+    if (!laneOf.has(seg.sessionRef)) laneOf.set(seg.sessionRef, laneOf.size);
   }
-  flush();
-  // 第二遍按时间序全局下推:甘特列不相交,跨列垂直重叠不遮挡;
+  const laneCount = laneOf.size;
+  if (laneCount === 0) return [];
+  const placed = new Array<{ lane: number; top: number; height: number }>(segments.length);
+  for (const { seg, idx } of order) {
+    const top0 = (minutesOfDay(seg.start) * opts.pxPerHour) / 60;
+    const activeH = (seg.activeMs * opts.pxPerHour) / 3_600_000;
+    const height =
+      seg.unfinished && opts.nowTop !== null
+        ? Math.max(opts.nowTop - top0, opts.minH)
+        : opts.nowTop !== null && top0 + Math.max(activeH, opts.minH) > opts.nowTop
+          ? activeH // 完成块最小高度延伸不得越过当前时刻线 → 截断回自然时长高
+          : Math.max(activeH, opts.minH);
+    placed[idx] = { lane: laneOf.get(seg.sessionRef) ?? 0, top: top0, height };
+  }
+  // 第二遍按时间序全局下推:会话列不相交,跨列垂直重叠不遮挡;
   // 仅同 lane 前块(最小高度撑出时段)底部越界时下推留缝(只推不拉,不越位)。
   const out = new Array<BlockLayout>(segments.length);
   for (let k = 0; k < order.length; k++) {
@@ -204,7 +170,7 @@ export function layoutSection(
       const q = placed[order[j].idx];
       if (q.lane === p.lane) p.top = Math.max(p.top, q.top + q.height + opts.gap);
     }
-    out[order[k].idx] = { lane: p.lane, laneCount: p.laneCount, top: p.top, height: p.height };
+    out[order[k].idx] = { lane: p.lane, laneCount, top: p.top, height: p.height };
   }
   return out;
 }
@@ -936,8 +902,8 @@ export function TodayPage({ onBack, onOpenSession }: TodayPageProps): JSX.Elemen
                         </div>
                       ))}
                       {/* 会话块:top∝段开始时刻(下推只推不拉),height∝段 active_ms 且
- ≥ 最小高度;同 lane 相邻块下推留缝互不覆盖;甘特分列——
- 宽 = 100/laneCount − 2% 缝、left = lane × 100/laneCount,列不相交 */}
+ ≥ 最小高度;同会话列相邻块下推留缝互不覆盖;会话分列——
+ 宽 = 100/会话数 − 2% 缝、left = 会话列号 × 100/会话数,列不相交 */}
                       {allSegments.map((seg, i) => {
                         const color = tagColor(seg.category);
                         const unfinished = seg.unfinished;

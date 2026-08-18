@@ -1,6 +1,15 @@
 import type { JSX } from 'react';
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { Badge } from '@/components/ui/badge';
 import { Dialog, DialogContent } from '@/components/ui/dialog';
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table';
 import { cn } from '@/lib/utils';
 import type { AgentPluginInfo, McpServerInfo, PluginsXray } from '../shared/plugins-api';
 import type { LorraError } from '../shared/result';
@@ -122,17 +131,17 @@ function McpPane({
   }
   return (
     <div className="skills-scroll">
-      <table className="sk-table" data-testid="plugins-mcp-table">
-        <thead>
-          <tr>
-            <th>名称</th>
-            <th>类型</th>
-            <th>来源</th>
-            <th>状态</th>
-            <th className="c">启用</th>
-          </tr>
-        </thead>
-        <tbody>
+      <Table data-testid="plugins-mcp-table">
+        <TableHeader>
+          <TableRow>
+            <TableHead>名称</TableHead>
+            <TableHead>类型</TableHead>
+            <TableHead>来源</TableHead>
+            <TableHead>状态</TableHead>
+            <TableHead className="c">启用</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
           {mcps.map((m: McpServerInfo) => {
             const toggle = (
               <label
@@ -150,28 +159,28 @@ function McpPane({
               </label>
             );
             return (
-              <tr key={m.id} data-testid="plugins-mcp-row" data-id={m.id}>
-                <td>
+              <TableRow key={m.id} data-testid="plugins-mcp-row" data-id={m.id}>
+                <TableCell>
                   <span className="sk-skill-name">{m.id}</span>
-                </td>
-                <td>
+                </TableCell>
+                <TableCell>
                   <span className="sk-pos">{m.type}</span>
-                </td>
-                <td>
+                </TableCell>
+                <TableCell>
                   <span className="sk-pos">
                     {m.origin === 'plugin' ? '插件 ' + m.pluginName : '用户'}
                   </span>
-                </td>
-                <td>{mcpHealthBadge(m)}</td>
+                </TableCell>
+                <TableCell>{mcpHealthBadge(m)}</TableCell>
                 {/* biome-ignore lint/a11y/useKeyWithClickEvents: 纯 stopPropagation 容器，键盘语义由内部 checkbox 承担 */}
-                <td className="c" onClick={(e) => e.stopPropagation()}>
+                <TableCell className="c" onClick={(e) => e.stopPropagation()}>
                   {toggle}
-                </td>
-              </tr>
+                </TableCell>
+              </TableRow>
             );
           })}
-        </tbody>
-      </table>
+        </TableBody>
+      </Table>
     </div>
   );
 }
@@ -223,44 +232,44 @@ function PluginsPane({
           <div className="e-sub">点「导入」装入 agent-plugins 目录，或「新建」脚手架。</div>
         </div>
       ) : (
-        <table className="sk-table" data-testid="plugins-plugin-table">
-          <thead>
-            <tr>
-              <th>插件</th>
-              <th>版本</th>
-              <th className="c">技能数</th>
-              <th className="c">MCP 数</th>
-              <th>状态</th>
-              <th className="c">启用</th>
-            </tr>
-          </thead>
-          <tbody>
+        <Table data-testid="plugins-plugin-table">
+          <TableHeader>
+            <TableRow>
+              <TableHead>插件</TableHead>
+              <TableHead>版本</TableHead>
+              <TableHead className="c">技能数</TableHead>
+              <TableHead className="c">MCP 数</TableHead>
+              <TableHead>状态</TableHead>
+              <TableHead className="c">启用</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
             {plugins.map((p: AgentPluginInfo) => (
-              <tr key={p.name} data-testid="plugins-plugin-row" data-name={p.name}>
-                <td>
+              <TableRow key={p.name} data-testid="plugins-plugin-row" data-name={p.name}>
+                <TableCell>
                   <span className="sk-skill-name">
                     {p.name}
                     {p.description && <span className="skills-sub"> · {p.description}</span>}
                   </span>
-                </td>
-                <td>
+                </TableCell>
+                <TableCell>
                   <span className="sk-pos">{p.version ?? '—'}</span>
-                </td>
-                <td className="c">
+                </TableCell>
+                <TableCell className="c">
                   <span className="sk-count">{p.skillCount}</span>
-                </td>
-                <td className="c">
+                </TableCell>
+                <TableCell className="c">
                   <span className="sk-count">{p.mcpCount}</span>
-                </td>
-                <td>
+                </TableCell>
+                <TableCell>
                   {p.issues.length > 0 ? (
-                    <span className="sk-b sk-b-issue">有问题</span>
+                    <Badge variant="issue">有问题</Badge>
                   ) : (
                     <span className="sk-pos">正常</span>
                   )}
-                </td>
+                </TableCell>
                 {/* biome-ignore lint/a11y/useKeyWithClickEvents: 纯 stopPropagation 容器，键盘语义由内部 checkbox 承担 */}
-                <td className="c" onClick={(e) => e.stopPropagation()}>
+                <TableCell className="c" onClick={(e) => e.stopPropagation()}>
                   <label className={cn('sk-tg', p.enabled && 'on')}>
                     <input
                       type="checkbox"
@@ -271,11 +280,11 @@ function PluginsPane({
                     />
                     <span className="sk-tg-track" aria-hidden="true" />
                   </label>
-                </td>
-              </tr>
+                </TableCell>
+              </TableRow>
             ))}
-          </tbody>
-        </table>
+          </TableBody>
+        </Table>
       )}
       {importOpen && (
         <ImportDialog

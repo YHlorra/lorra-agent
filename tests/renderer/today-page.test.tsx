@@ -46,7 +46,7 @@ import type { ReactElement } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { useAppStore } from '@/lib/app-store';
-import { TodayPage, assignLanes, layoutSection, PX_PER_HOUR } from '../../src/renderer/today-page';
+import { TodayPage, layoutSection, PX_PER_HOUR } from '../../src/renderer/today-page';
 import type { TimelineSegment } from '../../src/shared/ofk-schema';
 import {
   WORKSPACE_A,
@@ -442,7 +442,7 @@ describe('Requirement: 语义分段与甘特堆叠', () => {
     expect(sec?.querySelector('[data-testid="today-category-count"]')?.textContent).toBe('2');
   });
 
-  it('assignLanes 单测:重叠三段 → [0,1,0];无重叠 → 全 0;同 start 按 end 升序稳定', () => {
+  it('layoutSection 单测:同会话相邻短块同列下推留缝;跨会话分列各守时间位;同会话重叠下推', () => {
     const tseg = (startMin: number, endMin: number, sessionRef = 's'): TimelineSegment => ({
       sessionRef,
       workspace: WORKSPACE_A,
@@ -457,88 +457,65 @@ describe('Requirement: 语义分段与甘特堆叠', () => {
       model: 'm',
       tools: [],
     });
-    // [09:00-09:10] [09:05-09:15] [09:12-09:13] → 第 3 段复用第 1 列
-    expect(assignLanes([tseg(0, 10), tseg(5, 15), tseg(12, 13)])).toEqual([0, 1, 0]);
-    // 无重叠(首尾相接视为可容纳)→ 全 0
-    expect(assignLanes([tseg(0, 30), tseg(30, 60)])).toEqual([0, 0]);
-    // 同 start 按 end 升序:短段先处理占 lane0,长段 lane1(输入序 [long, short])
-    expect(assignLanes([tseg(0, 60, 'long'), tseg(0, 20, 'short')])).toEqual([1, 0]);
-    // 空数组 → []
-    expect(assignLanes([])).toEqual([]);
-  });
-
-  it('layoutSection 单测:相邻不重叠短块同列下推留缝;重叠对分列且各守时间位', () => {
-    const tseg = (startMin: number, endMin: number): TimelineSegment => ({
-      sessionRef: 's',
-      workspace: WORKSPACE_A,
-      category: 'work',
-      collector: 'pi-sdk',
-      start: at(0, 0) + startMin * 60_000,
-      end: at(0, 0) + endMin * 60_000,
-      activeMs: (endMin - startMin) * 60_000,
-      title: 't',
-      unfinished: false,
-      containsTodo: false,
-      model: 'm',
-      tools: [],
-    });
-    // 相邻短块:10min 时长高 10.7px < 最小高 24 → 第二块下推到前块底 + 2 缝
-    const geo = layoutSection([tseg(0, 10), tseg(20, 30)], {
-      pxPerHour: 64,
-      minH: 24,
-      gap: 2,
-      nowTop: null,
-    });
+    const opts = { pxPerHour: 64, minH: 24, gap: 2, nowTop: null };
+    // 同会话相邻短块:10min 时长高 10.7px < 最小高 24 → 第二块下推到前块底 + 2 缝
+    const geo = layoutSection([tseg(0, 10), tseg(20, 30)], opts);
     expect(geo[0]).toMatchObject({ lane: 0, laneCount: 1, top: 0, height: 24 });
     expect(geo[1]).toMatchObject({ lane: 0, laneCount: 1, top: 26, height: 24 });
-    // 重叠对:分两列、各守时间位(不被下推)
-    const g2 = layoutSection([tseg(0, 60), tseg(30, 60)], {
-      pxPerHour: 64,
-      minH: 24,
-      gap: 2,
-      nowTop: null,
-    });
+    // 跨会话重叠对:两会话 → 两列、各守时间位(不被下推)
+    const g2 = layoutSection([tseg(0, 60, 'a'), tseg(30, 60, 'b')], opts);
     expect(g2[0]).toMatchObject({ lane: 0, laneCount: 2, top: 0, height: 64 });
     expect(g2[1]).toMatchObject({ lane: 1, laneCount: 2, top: 32, height: 32 });
-    // 甘特列(2026-08-14 不重叠改造):跨 lane 垂直重叠不互推(列不相交,不遮挡);
-    // 同 lane 前块底越界才下推留缝
-    const g3 = layoutSection([tseg(0, 60), tseg(30, 90)], {
-      pxPerHour: 64,
-      minH: 24,
-      gap: 2,
-      nowTop: null,
-    });
+    // 跨会话:后段在另一列,不被同列下推(列不相交,不遮挡)
+    const g3 = layoutSection([tseg(0, 60, 'a'), tseg(30, 90, 'b')], opts);
     expect(g3[0]).toMatchObject({ lane: 0, laneCount: 2, top: 0, height: 64 });
     expect(g3[1]).toMatchObject({ lane: 1, laneCount: 2, top: 32, height: 64 }); // 不被下推
-    // 同 lane 两段(不重叠):后块时间位在前块最小高度底之下 → 下推留缝
-    const g4 = layoutSection([tseg(0, 10), tseg(20, 30)], {
-      pxPerHour: 64,
-      minH: 24,
-      gap: 2,
-      nowTop: null,
+    // 同会话重叠 → 同列下推留缝:第二段 top = 0 + 64 + 2 缝
+    const g5 = layoutSection([tseg(0, 60, 's'), tseg(30, 60, 's')], opts);
+    expect(g5[0]).toMatchObject({ lane: 0, laneCount: 1, top: 0, height: 64 });
+    expect(g5[1]).toMatchObject({ lane: 0, laneCount: 1, top: 66, height: 32 });
+    // 完成块(今天,nowTop 12:37):12:32–12:35 的 24px 最小高延伸会越过当前时刻线
+    // (底边到 12:54)→ 截断回自然时长高 3.2px,底边 = 12:35 严格在线之上
+    const g6 = layoutSection([tseg(0, 3, 'a'), tseg(32, 35, 'b')], {
+      ...opts,
+      nowTop: (37 * 64) / 60,
     });
-    expect(g4[0]).toMatchObject({ lane: 0, laneCount: 1, top: 0, height: 24 });
-    expect(g4[1]).toMatchObject({ lane: 0, laneCount: 1, top: 26, height: 24 });
+    expect(g6[1]).toMatchObject({ lane: 1, laneCount: 2 });
+    expect(g6[1].top).toBeCloseTo((32 * 64) / 60, 5);
+    expect(g6[1].height).toBeCloseTo((3 * 64) / 60, 5);
+    // 完成块最小高延伸在线之上(top0 + 24px ≤ nowTop)→ 保持 24px 不变
+    const g7 = layoutSection([tseg(0, 10, 'a'), tseg(20, 30, 'b')], { ...opts, nowTop: 64 });
+    expect(g7[1]).toMatchObject({ lane: 1, laneCount: 2, height: 24 });
   });
 
-  it('局部簇列宽 + 下推不覆盖:孤立会话独占整行;相邻短块垂直互不覆盖', async () => {
+  it('会话分列:4 会话 → 四列均分,left 0/25/50/75、宽 = 100/4 − 2 = 23', async () => {
     const data = makeDayData({
       facts: [
-        fact({ hour: 10, durMin: 21 }), // 孤立 → 整行宽
-        fact({ hour: 11, durMin: 58 }),
-        fact({ hour: 12, durMin: 5 }), // 短块:最小高度撑出时段
-        fact({ hour: 12, minute: 20, durMin: 8 }), // 相邻短块(top0 < 前块底+缝)→ 下推不覆盖
+        fact({ hour: 10, durMin: 21 }), // 会话 A
+        fact({ hour: 11, durMin: 58 }), // 会话 B
+        fact({ hour: 12, durMin: 5 }), // 会话 C
+        fact({ hour: 12, minute: 20, durMin: 8 }), // 会话 D(短块:最小高度撑出时段)
       ],
     });
     await renderDay(data);
     const bs = blocksByTop();
     expect(bs).toHaveLength(4);
-    // 孤立块宽度 = 整行 − 2% 列缝 = 98%
-    expect(parseFloat(bs[0].style.width)).toBe(98);
-    expect(parseFloat(bs[1].style.width)).toBe(98);
-    // 相邻短块同列:后块 top ≥ 前块底 + 2px 缝(不覆盖)
-    const prevBottom = parseFloat(bs[2].style.top) + parseFloat(bs[2].style.height);
-    expect(parseFloat(bs[3].style.top)).toBeGreaterThanOrEqual(prevBottom + 2);
+    // 4 会话 → 列宽 100/4 = 25 → left 0%/25%/50%/75%;宽 = 列宽 − 2% 缝 = 23
+    const colW = 100 / 4;
+    expect(parseFloat(bs[0].style.left)).toBeCloseTo(0, 5);
+    expect(parseFloat(bs[1].style.left)).toBeCloseTo(colW, 5);
+    expect(parseFloat(bs[2].style.left)).toBeCloseTo(2 * colW, 5);
+    expect(parseFloat(bs[3].style.left)).toBeCloseTo(3 * colW, 5);
+    for (const b of bs) {
+      expect(parseFloat(b.style.width)).toBeCloseTo(colW - 2, 5);
+    }
+    // 列不相交:任两列水平区间不重叠(left+width ≤ 下一列 left)
+    for (let i = 0; i < 3; i++) {
+      const left = parseFloat(bs[i].style.left);
+      const width = parseFloat(bs[i].style.width);
+      const nextLeft = parseFloat(bs[i + 1].style.left);
+      expect(left + width).toBeLessThanOrEqual(nextLeft);
+    }
   });
 
   it('甘特分列:三段互叠 → left 0%/33.3%/66.7%、宽 ≈ 31.3%、列不相交', async () => {
@@ -639,6 +616,22 @@ describe('Requirement: 未完成会话标记', () => {
     const unfinished = blocks().find((b) => b.getAttribute('data-unfinished') === 'true');
     expect(unfinished).toBeDefined();
     expect(parseFloat(unfinished!.style.height)).toBeGreaterThanOrEqual(24);
+  });
+
+  it('完成块最小高度延伸不越过当前时刻线:短块底边在线下时截断回自然时长高', async () => {
+    vi.setSystemTime(new Date(2026, 7, 8, 10, 37));
+    const data = makeDayData({
+      facts: [fact({ hour: 10, minute: 32, durMin: 3 })], // 10:32–10:35,距 now 2 分钟
+    });
+    await renderDay(data);
+    const b = blocks()[0];
+    const nowLine = document.querySelector('[data-testid="today-now-line"]') as HTMLElement;
+    // 底边 ≤ 当前时刻线(线下方是未来,完成块不侵入)
+    expect(parseFloat(b.style.top) + parseFloat(b.style.height)).toBeLessThanOrEqual(
+      parseFloat(nowLine.style.top) + 1e-6,
+    );
+    // 截断回自然时长高(3min → 3.2px),而非最小高 24px(否则底边到 10:57 越过 10:37 线)
+    expect(parseFloat(b.style.height)).toBeCloseTo((3 * PX_PER_HOUR) / 60, 5);
   });
 });
 

@@ -3462,6 +3462,15 @@ button:focus-visible, textarea:focus-visible, a:focus-visible {
   outline: none;
   border-color: rgb(var(--accent) / 0.5);
 }
+/* 2026-08-18 修复:icon+input 在内层 <form>,form 非 flex → gap 不生效,
+ 图标与文字 0 间距紧贴(看起来图标移位贴边)。form 设 flex 让 gap 生效。 */
+.memory-search form {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
 .memory-search {
   flex: 1 1 auto;
   min-width: 0;
@@ -4564,6 +4573,279 @@ button:focus-visible, textarea:focus-visible, a:focus-visible {
 }
 .sk-tt-wrap { display: inline-flex; }
 
+/* ── 位置徽章补全(2026-08-18 修复批:副标签层级 + 可读路径)── */
+.sk-pos { gap: 5px; }
+.sk-pos-sub {
+  font-size: 9.5px;
+  color: rgb(var(--ink-tertiary));
+  opacity: 0.85;
+}
+.sk-pos-cell {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 3px;
+  min-width: 0;
+}
+.sk-pos-path {
+  display: block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: 'Cascadia Mono', Consolas, monospace;
+  font-size: 10px;
+  line-height: 1.4;
+  color: rgb(var(--ink-tertiary));
+}
+
+/* ── Git 徽章补全(behind accent / dirty warm-brown)── */
+.sk-b-git-behind {
+  background: rgb(var(--accent-soft));
+  color: rgb(var(--accent));
+  border: 1px solid rgb(var(--line-light));
+}
+.sk-b-git-dirty {
+  background: #f2e6dc;
+  color: #8a4a33;
+  border: 1px solid #e0c4ae;
+}
+.dark .sk-b-git-dirty {
+  background: rgb(138 74 51 / 0.18);
+  border-color: rgb(138 74 51 / 0.5);
+}
+
+/* ── 行交互(可点行 cursor + hover 提示)── */
+.sk-row-clickable { cursor: pointer; }
+
+/* ── 编辑按钮(ghost 小按钮,与表格语言一致)── */
+.sk-edit { flex: 0 0 auto; }
+
+/* ── 收集/更新结果提示条 ── */
+.skills-result-banner {
+  margin: 12px 0 0;
+  padding: 10px 14px;
+  border: 1px solid rgb(var(--line-light));
+  border-radius: var(--radius-sm);
+  background: rgb(var(--accent-soft) / 0.45);
+  font-size: 12px;
+  line-height: 1.7;
+  color: rgb(var(--ink-secondary));
+}
+.sk-result-main { font-weight: 600; color: rgb(var(--ink-warm)); }
+.sk-result-list {
+  margin: 6px 0 0;
+  padding-left: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 11.5px;
+  color: rgb(var(--ink-tertiary));
+}
+
+/* ── 详情弹层(2026-08-18 修复批:此前 32 个 class 零样式,裸 HTML;
+ 同批最终态:弹层走组件库 Radix Dialog(components/ui/dialog),本块只补内容样式)── */
+.skills-detail {
+  max-height: min(720px, 82vh);
+  overflow-y: auto;
+  padding: 20px 22px 16px;
+  gap: 14px;
+}
+.sk-detail-head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding-right: 32px;
+}
+.sk-detail-name {
+  font: 500 18px/1.35 Georgia, 'Times New Roman', 'Songti SC', SimSun, serif;
+  color: rgb(var(--ink-warm));
+  overflow-wrap: anywhere;
+}
+.sk-b-scope {
+  background: rgb(var(--accent-soft));
+  color: rgb(var(--accent));
+  border: 1px solid rgb(var(--line-light));
+}
+.sk-b-src {
+  background: rgb(var(--panel));
+  color: rgb(var(--ink-muted));
+  border: 1px solid rgb(var(--line));
+}
+.sk-detail-path-row {
+  display: flex;
+  align-items: stretch;
+  gap: 8px;
+  min-width: 0;
+}
+.sk-detail-path-row .sk-detail-path { flex: 1 1 auto; }
+.sk-detail-section {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 0;
+}
+.sk-detail-path {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 7px 10px;
+  border: 1px solid rgb(var(--line-light));
+  border-radius: var(--radius-sm);
+  background: rgb(var(--panel) / 0.6);
+  font-family: 'Cascadia Mono', Consolas, monospace;
+  font-size: 11px;
+  line-height: 1.5;
+  color: rgb(var(--ink-secondary));
+  overflow-wrap: anywhere;
+  word-break: break-all;
+}
+.sk-detail-path-copy {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 7px;
+  border: 1px solid rgb(var(--line));
+  border-radius: var(--radius-sm);
+  background: rgb(var(--paper));
+  color: rgb(var(--ink-tertiary));
+  font-size: 10px;
+  cursor: pointer;
+  transition: border-color 130ms ease, color 130ms ease;
+}
+.sk-detail-path-copy:hover { border-color: rgb(var(--accent)); color: rgb(var(--accent)); }
+.sk-detail-path-copy.copied { color: rgb(var(--success)); border-color: rgb(var(--success) / 0.5); }
+.sk-detail-section-label {
+  font-size: 10.5px;
+  font-weight: 650;
+  letter-spacing: 0.04em;
+  color: rgb(var(--ink-tertiary));
+  text-transform: uppercase;
+}
+.sk-detail-desc {
+  margin: 2px 0 0;
+  font-size: 12.5px;
+  line-height: 1.75;
+  color: rgb(var(--ink-secondary));
+  overflow-wrap: anywhere;
+}
+.sk-detail-desc p { margin: 0 0 8px; }
+.sk-detail-desc p:last-child { margin-bottom: 0; }
+.sk-detail-desc code {
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: rgb(var(--panel));
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+}
+.sk-detail-muted {
+  margin: 2px 0 0;
+  padding: 8px 10px;
+  border: 1px dashed rgb(var(--line));
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  color: rgb(var(--ink-muted));
+  background: rgb(var(--panel) / 0.4);
+}
+.sk-detail-issues {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 5px;
+}
+.sk-detail-provenance {
+  padding: 9px 12px;
+  border: 1px solid rgb(var(--line-light));
+  border-radius: var(--radius-sm);
+  background: rgb(var(--panel) / 0.5);
+  font-size: 11.5px;
+  line-height: 1.8;
+  color: rgb(var(--ink-tertiary));
+}
+.sk-detail-stats {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+}
+.sk-detail-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 9px 12px;
+  border: 1px solid rgb(var(--line-light));
+  border-radius: var(--radius-sm);
+  background: rgb(var(--paper));
+}
+.sk-detail-stat-lb { font-size: 10.5px; color: rgb(var(--ink-muted)); }
+.sk-detail-stat-v { font-size: 13px; font-weight: 600; color: rgb(var(--ink-warm)); }
+.sk-detail-stat-v.num {
+  font-family: 'Cascadia Mono', Consolas, monospace;
+  font-variant-numeric: tabular-nums;
+}
+.sk-detail-buckets {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding-top: 2px;
+}
+.sk-detail-bucket {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 8px;
+  border: 1px solid rgb(var(--line));
+  border-radius: 999px;
+  background: rgb(var(--paper));
+  font-size: 10.5px;
+  color: rgb(var(--ink-secondary));
+}
+.sk-detail-bucket-ws {
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sk-detail-bucket-n {
+  font-family: 'Cascadia Mono', Consolas, monospace;
+  font-variant-numeric: tabular-nums;
+  color: rgb(var(--accent));
+}
+.sk-detail-git {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 9px 12px;
+  border: 1px solid rgb(var(--line-light));
+  border-radius: var(--radius-sm);
+  background: rgb(var(--panel) / 0.5);
+}
+.sk-detail-git-url {
+  font-family: 'Cascadia Mono', Consolas, monospace;
+  font-size: 10.5px;
+  line-height: 1.5;
+  color: rgb(var(--ink-tertiary));
+  overflow-wrap: anywhere;
+  word-break: break-all;
+}
+.sk-detail-git .sk-b { align-self: flex-start; }
+.sk-detail-git-badges { display: flex; gap: 6px; }
+.sk-detail-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-top: 12px;
+  border-top: 1px solid rgb(var(--line));
+}
+.sk-detail-hide-label { font-size: 12px; color: rgb(var(--ink-secondary)); }
+.sk-detail-spacer { flex: 1 1 auto; }
+
 /* ── 三态 ── */
 .skills-loading {
   display: flex;
@@ -4580,7 +4862,7 @@ button:focus-visible, textarea:focus-visible, a:focus-visible {
 .sk-skeleton-cap { width: 70%; height: 10px; margin-top: 6px; }
 .sk-skeltable-row {
   display: grid;
-  grid-template-columns: 3fr 1fr 0.7fr 1.1fr 0.8fr;
+  grid-template-columns: 3fr 1.2fr 0.7fr 1.1fr 0.8fr 0.8fr;
   gap: 10px;
   align-items: center;
   padding: 10px 12px;
@@ -4590,6 +4872,7 @@ button:focus-visible, textarea:focus-visible, a:focus-visible {
 .sk-skel-pos { height: 12px; width: 44px; }
 .sk-skel-num { height: 12px; width: 24px; justify-self: end; }
 .sk-skel-tg { height: 18px; width: 32px; border-radius: 999px; justify-self: end; }
+.sk-skel-edit { height: 22px; width: 44px; justify-self: end; border-radius: 4px; }
 .skills-error {
   display: flex;
   flex-direction: column;

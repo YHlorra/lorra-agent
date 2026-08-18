@@ -1,6 +1,7 @@
 import type { Dirent, Stats } from 'node:fs';
 import { existsSync, lstatSync, readdirSync, realpathSync, statSync, unlinkSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
+import os from 'node:os';
 import path from 'node:path';
 import { Result as ResultRuntime } from 'better-result';
 
@@ -129,6 +130,15 @@ export async function setWorkspaceEnabled(
   }
   const wsRes = await resolveWorkspacePath(wsPath);
   if (wsRes.isErr()) return wsRes;
+  // 2026-08-18 修复:补发现集合校验(此前只查非空,任意字符串可写进 settings;
+  // 与 setSkillEnabled 同口径)。扫描失败不阻断停用写回?不——校验失败即返回,
+  // 避免把幽灵名字写进名单造成「已停用但页面无此技能」。
+  const scanRes = await scanSkills(wsRes.value);
+  if (scanRes.isErr()) return scanRes;
+  const known = new Set(scanRes.value.skills.map((s) => s.name));
+  if (!known.has(name)) {
+    return err({ code: 'skill-not-found', message: '技能不存在' });
+  }
   const wsReal = wsRes.value;
   const settings = await readSettings();
   const overrides = settings.workspaceSkillOverrides ?? {};
@@ -292,10 +302,12 @@ export async function getSkillXray(wsPath?: string): Promise<Result<SkillXray>> 
   );
   if (statsRes.isErr()) return statsRes;
 
-  const danglingRes = await scanDanglingLinks(ws);
+  // 2026-08-18:stats/dangling/git 相互独立 → 并行拉取(原串行,首屏慢)。
+  const [danglingRes, gitRes] = await Promise.all([
+    scanDanglingLinks(ws),
+    getLocalGitStatuses(collectionRoot),
+  ]);
   if (danglingRes.isErr()) return danglingRes;
-
-  const gitRes = await getLocalGitStatuses(collectionRoot);
   if (gitRes.isErr()) return gitRes;
 
   return ok({
@@ -306,6 +318,7 @@ export async function getSkillXray(wsPath?: string): Promise<Result<SkillXray>> 
     gitStatus: gitRes.value,
     collectionRoot,
     workspacePath: ws,
+    homeDir: os.homedir(),
   });
 }
 

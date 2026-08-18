@@ -331,6 +331,7 @@ describe('skills-ipc(lorra.skills.*,D9 契约)', () => {
   // ---------------------------------------------------------------------
 
   it('Scenario setWsEnabled 合法参数 → workspaceSkillOverrides[wsRealpath] 名单写入并落盘', async () => {
+    writeWorkspaceSkill(ws, 'alpha', 'alpha 描述');
     const res = await call<void>(SKILLS_IPC.setWsEnabled, { name: 'alpha', enabled: false });
     expect(res.ok).toBe(true);
 
@@ -341,6 +342,7 @@ describe('skills-ipc(lorra.skills.*,D9 契约)', () => {
   });
 
   it('Scenario setWsEnabled 恢复启用 → 名单移除', async () => {
+    writeWorkspaceSkill(ws, 'alpha', 'alpha 描述');
     await call<void>(SKILLS_IPC.setWsEnabled, { name: 'alpha', enabled: false });
     const res = await call<void>(SKILLS_IPC.setWsEnabled, { name: 'alpha', enabled: true });
     expect(res.ok).toBe(true);

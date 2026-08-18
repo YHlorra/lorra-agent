@@ -185,6 +185,54 @@ describe('collectSkills(收编 + 软链)', () => {
     expect(shell.trashItem).not.toHaveBeenCalled();
   });
 
+  it('Scenario frontmatter name 相同而目录名不同:不收集出第二份同名技能(2026-08-18 修复)', async () => {
+    // 工作区:目录 dir-a,frontmatter name=shared-name。
+    mkdirSync(path.join(ws, '.lorra', 'skills', 'dir-a'), { recursive: true });
+    writeFileSync(
+      path.join(ws, '.lorra', 'skills', 'dir-a', 'SKILL.md'),
+      '---\nname: shared-name\ndescription: 工作区版\n---\n\n工作区内容\n',
+      'utf8',
+    );
+    // 收集根:目录 dir-b,frontmatter name=shared-name(不同目录名)。
+    mkdirSync(path.join(collectionRoot, 'dir-b'), { recursive: true });
+    writeFileSync(
+      path.join(collectionRoot, 'dir-b', 'SKILL.md'),
+      '---\nname: shared-name\ndescription: 收集根版\n---\n\n收集根内容\n',
+      'utf8',
+    );
+
+    const result = unwrap(await collectSkills(ws, { collectionRoot }));
+
+    // 不等价 → 冲突,不移动不建链(此前会按目录名收集出 dir-a/dir-b 两份同名)。
+    expect(result.moved).toBe(0);
+    expect(result.linked).toBe(0);
+    expect(result.conflicts).toHaveLength(1);
+    expect(result.conflicts[0]).toContain('shared-name');
+    expect(existsSync(path.join(ws, '.lorra', 'skills', 'dir-a', 'SKILL.md'))).toBe(true);
+  });
+
+  it('Scenario frontmatter name 相同且内容等价:trash 原实体 + 原位 junction 指向已有技能', async () => {
+    mkdirSync(path.join(ws, '.lorra', 'skills', 'dir-a'), { recursive: true });
+    writeFileSync(
+      path.join(ws, '.lorra', 'skills', 'dir-a', 'SKILL.md'),
+      '---\nname: shared-name\ndescription: 同一份\n---\n\n等价内容\n',
+      'utf8',
+    );
+    mkdirSync(path.join(collectionRoot, 'dir-b'), { recursive: true });
+    writeFileSync(
+      path.join(collectionRoot, 'dir-b', 'SKILL.md'),
+      '---\nname: shared-name\ndescription: 同一份\n---\n\n等价内容\n',
+      'utf8',
+    );
+
+    const result = unwrap(await collectSkills(ws, { collectionRoot }));
+
+    expect(result.linked).toBe(1);
+    expect(result.conflicts).toEqual([]);
+    expect(shell.trashItem).toHaveBeenCalledWith(path.join(ws, '.lorra', 'skills', 'dir-a'));
+    expect(isLink(path.join(ws, '.lorra', 'skills', 'dir-a'))).toBe(true);
+  });
+
   it('Scenario 系统管理种子排除:memory-maintenance/daily-review/deep-review 不动', async () => {
     for (const name of ['memory-maintenance', 'daily-review', 'deep-review']) {
       writeDirSkill(path.join(ws, '.lorra', 'skills'), name);

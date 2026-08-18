@@ -11,6 +11,10 @@ const config: ForgeConfig = {
     // LORRA_ELECTRON_ZIP_DIR: use a pre-patched Electron zip (default_app.asar removed).
     // Workaround for the same Orca locking on the template's default_app.asar.
     electronZipDir: process.env.LORRA_ELECTRON_ZIP_DIR || undefined,
+    // lorra 应用图标(白发蓝瞳动漫少女吉祥物,深蓝圆角方底)。
+    // 多尺寸 ICO:16/24/32 简化版 + 48/64/128/256 详细版,见 build/icon.ico。
+    // 生成方式:python scripts/build-icon.py(依赖 PIL,无需新增 npm 原生包)。
+    icon: 'build/icon.ico',
   },
   makers: [new MakerSquirrel({})],
   plugins: [

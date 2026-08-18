@@ -1,7 +1,17 @@
 import { ArrowLeft } from 'lucide-react';
 import type { JSX } from 'react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Badge } from '@/components/ui/badge';
 import { Dialog, DialogContent } from '@/components/ui/dialog';
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableFooter,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { useAppStore } from '@/lib/app-store';
 import { cn } from '@/lib/utils';
@@ -125,6 +135,20 @@ export function SkillsPage({ onBack, onOpenFile, embedded }: SkillsPageProps): J
   const [updatingAll, setUpdatingAll] = useState(false);
   const [experienceAudit, setExperienceAudit] = useState<ExperienceAuditDto | null>(null);
   const [okfAudit, setOkfAudit] = useState<OkfCheckResultDto | null>(null);
+  /** 弹层路径复制反馈(1.2s 后复位)。 */
+  const [copied, setCopied] = useState(false);
+  const copyTimer = useRef<number | null>(null);
+
+  const copyPath = useCallback(async (filePath: string): Promise<void> => {
+    try {
+      await navigator.clipboard.writeText(filePath);
+      setCopied(true);
+      if (copyTimer.current !== null) window.clearTimeout(copyTimer.current);
+      copyTimer.current = window.setTimeout(() => setCopied(false), 1200);
+    } catch {
+      // 剪贴板不可用(权限/非安全上下文):静默失败,不影响弹层其余交互。
+    }
+  }, []);
 
   const fetchXray = useCallback(async (): Promise<SkillXray> => {
     const bridge = window.lorra?.skills;
@@ -345,10 +369,6 @@ export function SkillsPage({ onBack, onOpenFile, embedded }: SkillsPageProps): J
 
   const skills = xray?.skills ?? [];
   const statsOf = useCallback((name: string): SkillStats | undefined => xray?.stats[name], [xray]);
-  const gitOf = useCallback(
-    (name: string): SkillGitStatus | undefined => xray?.gitStatus[name],
-    [xray],
-  );
 
   // 5 统计卡数字(口径 = spec「技能管理页」+ 2026-08-13 批):
   // 全部 = 列表长度;45 天用过 = recentCount>0;吃灰 = 已启用 ∧ 本工作区启用 ∧
@@ -389,7 +409,6 @@ export function SkillsPage({ onBack, onOpenFile, embedded }: SkillsPageProps): J
   );
 
   const selectedStats = selected ? statsOf(selected.name) : undefined;
-  const selectedGit = selected ? gitOf(selected.name) : undefined;
   const selectedBuckets = useMemo(() => {
     if (!selectedStats) return [];
     return Object.entries(selectedStats.byWorkspace)
@@ -566,6 +585,7 @@ export function SkillsPage({ onBack, onOpenFile, embedded }: SkillsPageProps): J
                     <span className="sk-skeleton sk-skel-num" />
                     <span className="sk-skeleton sk-skel-num" />
                     <span className="sk-skeleton sk-skel-tg" />
+                    <span className="sk-skeleton sk-skel-edit" />
                   </div>
                 ))}
               </div>
@@ -685,23 +705,23 @@ export function SkillsPage({ onBack, onOpenFile, embedded }: SkillsPageProps): J
                 )}
               </section>
 
-              {/* 单表格:技能+徽章 / 位置(scope) / Git / 45 天 / 最近触发 / 本工作区开关 / 操作 */}
-              <table className="sk-table" data-testid="skills-table">
-                <thead>
-                  <tr>
-                    <th>技能</th>
-                    <th>位置</th>
-                    <th>Git</th>
-                    <th className="c">45 天</th>
-                    <th>最近触发</th>
-                    <th>状态</th>
-                    <th className="c">操作</th>
-                  </tr>
-                </thead>
-                <tbody>
+              {/* 单表格:技能+徽章 / 位置(scope+可读路径) / 45 天 / 最近触发 / 本工作区开关 / 操作
+ (2026-08-18:删 Git 列——newmax 无此列,「有更新/已修改」对用户是噪音;
+ git 状态仍可在页头「检查更新」消费;表格/徽章走组件库 Table/Badge) */}
+              <Table data-testid="skills-table">
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>技能</TableHead>
+                    <TableHead>位置</TableHead>
+                    <TableHead className="c">45 天</TableHead>
+                    <TableHead>最近触发</TableHead>
+                    <TableHead>状态</TableHead>
+                    <TableHead className="c">操作</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
                   {rows.map((skill, i) => {
                     const st = statsOf(skill.name);
-                    const git = gitOf(skill.name);
                     const never = (st?.totalCount ?? 0) === 0;
                     const delay = Math.min((i + 1) * ENTRANCE_STAGGER_MS, ENTRANCE_STAGGER_MAX_MS);
                     const editable = skill.source === 'workspace';
@@ -749,7 +769,7 @@ export function SkillsPage({ onBack, onOpenFile, embedded }: SkillsPageProps): J
                       </button>
                     );
                     return (
-                      <tr
+                      <TableRow
                         className="sk-anim sk-row-clickable"
                         key={skill.name}
                         data-testid="skills-row"
@@ -757,66 +777,49 @@ export function SkillsPage({ onBack, onOpenFile, embedded }: SkillsPageProps): J
                         style={{ animationDelay: `${delay}ms` }}
                         onClick={() => setSelected(skill)}
                       >
-                        <td>
+                        <TableCell>
                           <span className="sk-skill-name">
                             {skill.name}
-                            {skill.systemManaged && (
-                              <span className="sk-b sk-b-inner">内部·未注入</span>
-                            )}
-                            {skill.isDuplicate && <span className="sk-b sk-b-dupe">副本</span>}
+                            {skill.systemManaged && <Badge variant="inner">内部·未注入</Badge>}
+                            {skill.isDuplicate && <Badge variant="dupe">副本</Badge>}
                             {!skill.systemManaged &&
                               skill.issues.map((issue) => (
-                                <span
-                                  className="sk-b sk-b-issue"
-                                  key={issue.code}
-                                  title={issue.message}
-                                >
+                                <Badge variant="issue" key={issue.code} title={issue.message}>
                                   {ISSUE_LABELS[issue.code] ?? issue.message}
-                                </span>
+                                </Badge>
                               ))}
                           </span>
-                        </td>
-                        <td>
-                          <span className="sk-pos" data-scope={skill.scope} title={skill.filePath}>
-                            {SCOPE_LABELS[skill.scope]}
-                            <span className="sk-pos-sub">{SOURCE_SUB_LABELS[skill.source]}</span>
-                          </span>
-                        </td>
-                        <td className="c">
-                          {git?.behind && (
+                        </TableCell>
+                        <TableCell>
+                          <div className="sk-pos-cell">
                             <span
-                              className="sk-b sk-b-git-behind"
-                              data-testid="skills-git-badge"
-                              data-state="behind"
+                              className="sk-pos"
+                              data-scope={skill.scope}
+                              title={skill.filePath}
                             >
-                              有更新
+                              {SCOPE_LABELS[skill.scope]}
+                              <span className="sk-pos-sub">{SOURCE_SUB_LABELS[skill.source]}</span>
                             </span>
-                          )}
-                          {git?.dirty && (
-                            <span
-                              className="sk-b sk-b-git-dirty"
-                              data-testid="skills-git-badge"
-                              data-state="dirty"
-                            >
-                              已修改
+                            <span className="sk-pos-path" title={skill.filePath}>
+                              {displayPath(skill.filePath, xray?.homeDir)}
                             </span>
-                          )}
-                        </td>
-                        <td className="c">
+                          </div>
+                        </TableCell>
+                        <TableCell className="c">
                           <span
                             className={cn('sk-count', never && 'never')}
                             title={`累计 ${st?.totalCount ?? 0} 次`}
                           >
                             {st?.recentCount ?? 0}
                           </span>
-                        </td>
-                        <td>
+                        </TableCell>
+                        <TableCell>
                           <span className={cn('sk-last', never && 'never')}>
                             {fmtLastUsed(st?.lastUsedAt ?? null)}
                           </span>
-                        </td>
+                        </TableCell>
                         {/* biome-ignore lint/a11y/useKeyWithClickEvents: 纯 stopPropagation 容器(开关/按钮自有键盘语义) */}
-                        <td onClick={(e) => e.stopPropagation()}>
+                        <TableCell onClick={(e) => e.stopPropagation()}>
                           <span className="sk-tgrow">
                             {toggleDisabled ? (
                               <Tooltip>
@@ -831,9 +834,9 @@ export function SkillsPage({ onBack, onOpenFile, embedded }: SkillsPageProps): J
                               toggle
                             )}
                           </span>
-                        </td>
+                        </TableCell>
                         {/* biome-ignore lint/a11y/useKeyWithClickEvents: 纯 stopPropagation 容器(编辑按钮自有键盘语义) */}
-                        <td onClick={(e) => e.stopPropagation()}>
+                        <TableCell onClick={(e) => e.stopPropagation()}>
                           <span className="sk-tgrow">
                             {editable ? (
                               editBtn
@@ -846,17 +849,19 @@ export function SkillsPage({ onBack, onOpenFile, embedded }: SkillsPageProps): J
                               </Tooltip>
                             )}
                           </span>
-                        </td>
-                      </tr>
+                        </TableCell>
+                      </TableRow>
                     );
                   })}
-                </tbody>
-                <tfoot>
-                  <tr className="sk-frow" data-testid="skills-frow">
-                    <td colSpan={7}>共 {hero.total} 个 · 全量技能按最近触发排序</td>
-                  </tr>
-                </tfoot>
-              </table>
+                </TableBody>
+                <TableFooter>
+                  <TableRow>
+                    <TableCell colSpan={6} data-testid="skills-frow">
+                      共 {hero.total} 个 · 全量技能按最近触发排序
+                    </TableCell>
+                  </TableRow>
+                </TableFooter>
+              </Table>
             </>
           )}
         </div>
@@ -872,102 +877,108 @@ export function SkillsPage({ onBack, onOpenFile, embedded }: SkillsPageProps): J
           >
             <div className="sk-detail-head">
               <h2 className="sk-detail-name">{selected.name}</h2>
-              <span className="sk-b sk-b-scope" data-scope={selected.scope}>
+              <Badge variant="scope" data-scope={selected.scope}>
                 {SCOPE_LABELS[selected.scope]}
-              </span>
-              <span className="sk-b sk-b-src">{SOURCE_SUB_LABELS[selected.source]}</span>
+              </Badge>
+              <Badge variant="source">{SOURCE_SUB_LABELS[selected.source]}</Badge>
+              {selected.systemManaged && <Badge variant="inner">内部·未注入</Badge>}
+              {selected.isDuplicate && <Badge variant="dupe">副本</Badge>}
             </div>
-            <div
-              className="sk-detail-path"
-              data-testid="skills-detail-path"
-              title={selected.filePath}
-            >
-              {selected.filePath}
+            <div className="sk-detail-path-row">
+              <div
+                className="sk-detail-path"
+                data-testid="skills-detail-path"
+                title={selected.filePath}
+              >
+                {displayPath(selected.filePath, xray?.homeDir)}
+              </div>
+              <button
+                type="button"
+                className={cn('sk-detail-path-copy', copied && 'copied')}
+                data-testid="skills-detail-path-copy"
+                onClick={() => void copyPath(selected.filePath)}
+              >
+                {copied ? '已复制' : '复制完整路径'}
+              </button>
             </div>
-            {selected.description ? (
-              <div className="sk-detail-desc" data-testid="skills-detail-desc">
-                <SafeMarkdown content={selected.description} />
-              </div>
-            ) : (
-              <div className="sk-detail-muted" data-testid="skills-detail-desc">
-                缺描述（技能不会被注入提示清单）
-              </div>
-            )}
+            <div className="sk-detail-section">
+              <div className="sk-detail-section-label">描述</div>
+              {selected.description ? (
+                <div className="sk-detail-desc" data-testid="skills-detail-desc">
+                  <SafeMarkdown content={selected.description} />
+                </div>
+              ) : (
+                <div className="sk-detail-muted" data-testid="skills-detail-desc">
+                  缺描述（技能不会被注入提示清单）
+                </div>
+              )}
+            </div>
             {selected.issues.length > 0 && (
-              <ul className="sk-detail-issues" data-testid="skills-detail-issues">
-                {selected.issues.map((issue) => (
-                  <li className="sk-b sk-b-issue" key={issue.code}>
-                    {issue.message}
-                  </li>
-                ))}
-              </ul>
+              <div className="sk-detail-section">
+                <div className="sk-detail-section-label">健康项</div>
+                <ul className="sk-detail-issues" data-testid="skills-detail-issues">
+                  {selected.issues.map((issue) => (
+                    <li key={issue.code}>
+                      <Badge variant="issue">{issue.message}</Badge>
+                    </li>
+                  ))}
+                </ul>
+              </div>
             )}
-            {(experienceAudit || okfAudit) && (
+            {/* provenance 仅经验生成技能展示(2026-08-18:此前对所有技能跑 okfCheck,
+ 普通技能弹层全是「未声明类型·问题 6 项」噪音);OKF 校验并入本块。 */}
+            {experienceAudit && (
               <div className="sk-detail-provenance" data-testid="skills-detail-provenance">
-                {experienceAudit && (
-                  <>
-                    <div>
-                      {experienceAudit.generated ? 'generated skill' : '普通 skill'}；case:
-                      {experienceAudit.caseIds.join(', ') || '无'}；entry:
-                      {experienceAudit.entryIds.join(', ') || '无'}
-                    </div>
-                    {experienceAudit.warnings.length > 0 && (
-                      <div>警告：{experienceAudit.warnings.join('；')}</div>
-                    )}
-                  </>
+                <div>
+                  来源：{experienceAudit.generated ? '经验生成技能' : '普通技能'}
+                  {experienceAudit.caseIds.length > 0 &&
+                    ` · 基于案例 ${experienceAudit.caseIds.length} 个`}
+                  {experienceAudit.entryIds.length > 0 &&
+                    ` · 关联记忆条目 ${experienceAudit.entryIds.length} 个`}
+                </div>
+                {experienceAudit.warnings.length > 0 && (
+                  <div>警告：{experienceAudit.warnings.join('；')}</div>
                 )}
                 {okfAudit && (
                   <div data-testid="skills-detail-okf">
-                    OKF：type={okfAudit.type ?? 'unknown'}；verified=
-                    {okfAudit.verified ? 'true' : 'false'}；问题 {okfAudit.issues.length} 项
-                    {okfAudit.issues.length > 0 ? `；${okfAudit.issues[0]?.message ?? ''}` : ''}
+                    OKF 校验：{okfAudit.type ?? '未声明类型'} ·{' '}
+                    {okfAudit.verified ? '已核验' : '未核验'}
+                    {okfAudit.issues.length > 0
+                      ? ` · 问题 ${okfAudit.issues.length} 项（${okfAudit.issues[0]?.message ?? ''}）`
+                      : ''}
                   </div>
                 )}
               </div>
             )}
-            <div className="sk-detail-stats" data-testid="skills-detail-stats">
-              <div className="sk-detail-stat">
-                <span className="sk-detail-stat-lb">45 天触发</span>
-                <span className="sk-detail-stat-v num">{selectedStats?.recentCount ?? 0}</span>
-              </div>
-              <div className="sk-detail-stat">
-                <span className="sk-detail-stat-lb">总次数</span>
-                <span className="sk-detail-stat-v num">{selectedStats?.totalCount ?? 0}</span>
-              </div>
-              <div className="sk-detail-stat">
-                <span className="sk-detail-stat-lb">最后触发</span>
-                <span className="sk-detail-stat-v">
-                  {fmtLastUsed(selectedStats?.lastUsedAt ?? null)}
-                </span>
-              </div>
-              {selectedBuckets.length > 0 && (
-                <div className="sk-detail-buckets">
-                  {selectedBuckets.map(({ ws, count }) => (
-                    <div className="sk-detail-bucket" key={ws} title={ws}>
-                      <span className="sk-detail-bucket-ws">{pathLabel(ws)}</span>
-                      <span className="sk-detail-bucket-n num">{count}</span>
-                    </div>
-                  ))}
+            <div className="sk-detail-section">
+              <div className="sk-detail-section-label">触发统计</div>
+              <div className="sk-detail-stats" data-testid="skills-detail-stats">
+                <div className="sk-detail-stat">
+                  <span className="sk-detail-stat-lb">45 天触发</span>
+                  <span className="sk-detail-stat-v num">{selectedStats?.recentCount ?? 0}</span>
                 </div>
-              )}
+                <div className="sk-detail-stat">
+                  <span className="sk-detail-stat-lb">总次数</span>
+                  <span className="sk-detail-stat-v num">{selectedStats?.totalCount ?? 0}</span>
+                </div>
+                <div className="sk-detail-stat">
+                  <span className="sk-detail-stat-lb">最后触发</span>
+                  <span className="sk-detail-stat-v">
+                    {fmtLastUsed(selectedStats?.lastUsedAt ?? null)}
+                  </span>
+                </div>
+                {selectedBuckets.length > 0 && (
+                  <div className="sk-detail-buckets">
+                    {selectedBuckets.map(({ ws, count }) => (
+                      <div className="sk-detail-bucket" key={ws} title={ws}>
+                        <span className="sk-detail-bucket-ws">{pathLabel(ws)}</span>
+                        <span className="sk-detail-bucket-n num">{count}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
             </div>
-            {selectedGit && (
-              <div className="sk-detail-git" data-testid="skills-detail-git">
-                <div className="sk-detail-git-url" title={selectedGit.gitUrl}>
-                  {selectedGit.gitUrl}
-                </div>
-                {selectedGit.behind && (
-                  <span className="sk-b sk-b-git-behind" data-state="behind">
-                    有更新
-                  </span>
-                )}
-                {selectedGit.dirty && (
-                  <span className="sk-b sk-b-git-dirty" data-state="dirty">
-                    已修改
-                  </span>
-                )}
-              </div>
-            )}
             <div className="sk-detail-actions">
               <label
                 className={cn(
@@ -1011,4 +1022,19 @@ function pathLabel(ws: string): string {
   const base = ws.replace(/[\\/]+$/, '');
   const idx = Math.max(base.lastIndexOf('/'), base.lastIndexOf('\\'));
   return idx >= 0 ? base.slice(idx + 1) : base;
+}
+
+/**
+ * 可读路径:homeDir 前缀缩写为 ~(win32 大小写不敏感,分隔符归一)。
+ * homeDir 缺失(测试夹具等)→ 原样返回,页面不炸。
+ */
+function displayPath(p: string, homeDir?: string): string {
+  if (!homeDir || homeDir === '') return p;
+  const normP = p.replace(/\\/g, '/');
+  const normH = homeDir.replace(/\\/g, '/');
+  const lowerP = normP.toLowerCase();
+  const lowerH = normH.toLowerCase();
+  if (lowerP === lowerH) return '~';
+  if (lowerP.startsWith(`${lowerH}/`)) return `~${normP.slice(normH.length)}`;
+  return p;
 }

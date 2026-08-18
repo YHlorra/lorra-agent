@@ -444,6 +444,38 @@ describe('Requirement: 表格行内容', () => {
     expect(posOf('col-a').title).toBe('E:/collection/col-a/SKILL.md');
   });
 
+  it('Scenario 位置列可见完整路径:homeDir 前缀缩写 ~,其余原样', async () => {
+    const home = 'C:/Users/t';
+    await renderPage(
+      makeXray({
+        homeDir: home,
+        skills: [
+          makeSkill({
+            name: 'home-a',
+            source: 'user',
+            filePath: 'C:/Users/t/.agents/skills/home-a/SKILL.md',
+          }),
+          makeSkill({
+            name: 'ext-b',
+            source: 'collection',
+            filePath: 'E:/collection/ext-b/SKILL.md',
+          }),
+        ],
+        stats: {
+          'home-a': makeStats({ totalCount: 0, recentCount: 0, lastUsedAt: null }),
+          'ext-b': makeStats({ totalCount: 0, recentCount: 0, lastUsedAt: null }),
+        },
+      }),
+    );
+    // 主目录内 → ~ 缩写;主目录外 → 原路径(完整可见,不靠 hover)。
+    expect(row('home-a').querySelector('.sk-pos-path')?.textContent).toBe(
+      '~/.agents/skills/home-a/SKILL.md',
+    );
+    expect(row('ext-b').querySelector('.sk-pos-path')?.textContent).toBe(
+      'E:/collection/ext-b/SKILL.md',
+    );
+  });
+
   it('Scenario 45 天触发数字(等宽右对齐列)与从未使用高行动信号', async () => {
     await renderPage(xray);
     expect(row('broken-a').textContent).toMatch(/12/); // recentCount
@@ -689,41 +721,9 @@ describe('Requirement: 编辑(仅工作区源)', () => {
 });
 
 // =========================================================================
-// Requirement: Git 徽章列(有更新 / 已修改 / 无条目不渲染)
+// Git:列已删(2026-08-18,newmax 无此列)——git 状态仅经页头「检查更新」消费,
+// 由 checkUpdates/updateAll 测试覆盖。
 // =========================================================================
-
-describe('Requirement: Git 徽章列', () => {
-  const gitSkill = makeSkill({ name: 'git-a' });
-  const dirtySkill = makeSkill({ name: 'dirty-b' });
-  const plainSkill = makeSkill({ name: 'plain-c' });
-
-  it('Scenario behind → accent 徽章「有更新」;dirty → warn 徽章「已修改」;无条目 → 不渲染', async () => {
-    await renderPage(
-      makeXray({
-        skills: [gitSkill, dirtySkill, plainSkill],
-        stats: {
-          'git-a': makeStats(),
-          'dirty-b': makeStats(),
-          'plain-c': makeStats(),
-        },
-        gitStatus: {
-          'git-a': { gitUrl: 'https://github.com/x/git-a', behind: true, dirty: false },
-          'dirty-b': { gitUrl: 'https://github.com/x/dirty-b', behind: false, dirty: true },
-        },
-      }),
-    );
-    const gitBadges = (name: string): HTMLElement[] =>
-      Array.from(row(name).querySelectorAll('[data-testid="skills-git-badge"]'));
-    expect(gitBadges('git-a')).toHaveLength(1);
-    expect(gitBadges('git-a')[0]).toHaveTextContent('有更新');
-    expect(gitBadges('git-a')[0].getAttribute('data-state')).toBe('behind');
-    expect(gitBadges('dirty-b')).toHaveLength(1);
-    expect(gitBadges('dirty-b')[0]).toHaveTextContent('已修改');
-    expect(gitBadges('dirty-b')[0].getAttribute('data-state')).toBe('dirty');
-    // 无 gitStatus 条目 → 无徽章。
-    expect(gitBadges('plain-c')).toHaveLength(0);
-  });
-});
 
 // =========================================================================
 // Requirement: 详情弹层(点行打开;开关/操作单元格不冒泡)
@@ -756,7 +756,7 @@ describe('Requirement: 技能详情弹层', () => {
     },
   });
 
-  it('Scenario 点行(名称区)打开弹层:标题/路径/描述 SafeMarkdown/健康项/统计分桶/git 块', async () => {
+  it('Scenario 点行(名称区)打开弹层:标题/路径/描述 SafeMarkdown/健康项/统计分桶', async () => {
     const user = userEvent.setup();
     await renderPage(detailXray);
     await user.click(within(row('detail-a')).getByText('detail-a'));
@@ -780,10 +780,10 @@ describe('Requirement: 技能详情弹层', () => {
     expect(stats.textContent).toContain('7');
     expect(stats.textContent).toContain('ws-a');
     expect(stats.textContent).toContain('ws-b');
-    // git 块:gitUrl + 「有更新」徽章
-    const git = within(modal).getByTestId('skills-detail-git');
-    expect(git.textContent).toContain('https://github.com/x/detail-a');
-    expect(git.textContent).toContain('有更新');
+    // git 块已删(2026-08-18,newmax 无 git 呈现)。
+    expect(within(modal).queryByTestId('skills-detail-git')).toBeNull();
+    // 普通技能(非 generated)→ 不渲染 provenance/OKF(2026-08-18 收敛)。
+    expect(within(modal).queryByTestId('skills-detail-provenance')).toBeNull();
   });
 
   it('Scenario generated skill 详情弹层展示 provenance 与 OKF 状态', async () => {
@@ -831,9 +831,11 @@ describe('Requirement: 技能详情弹层', () => {
     const modal = await screen.findByTestId('skills-detail-modal');
 
     expect(await within(modal).findByTestId('skills-detail-provenance')).toHaveTextContent(
-      'case:case-1',
+      '基于案例 1 个',
     );
-    expect(within(modal).getByTestId('skills-detail-provenance')).toHaveTextContent('entry:mem-1');
+    expect(within(modal).getByTestId('skills-detail-provenance')).toHaveTextContent(
+      '关联记忆条目 1 个',
+    );
     expect(within(modal).getByTestId('skills-detail-provenance')).toHaveTextContent('verified=false');
     expect(within(modal).getByTestId('skills-detail-okf')).toHaveTextContent(
       'verified 未声明或为 false',
@@ -894,12 +896,14 @@ describe('Requirement: 技能详情弹层', () => {
     expect(within(modal).getByTestId('skills-detail-edit')).not.toBeDisabled();
   });
 
-  it('Scenario 无 git 条目的技能:弹层不渲染 git 块', async () => {
+  it('Scenario 原生弹层:ESC 关闭(2026-08-18 去 Radix Dialog)', async () => {
     const user = userEvent.setup();
     await renderPage(detailXray);
     await user.click(within(row('ws-b')).getByText('ws-b'));
     const modal = await screen.findByTestId('skills-detail-modal');
-    expect(within(modal).queryByTestId('skills-detail-git')).toBeNull();
+    expect(modal).toBeInTheDocument();
+    await user.keyboard('{Escape}');
+    await waitFor(() => expect(screen.queryByTestId('skills-detail-modal')).toBeNull());
   });
 });
 

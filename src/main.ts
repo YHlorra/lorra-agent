@@ -91,6 +91,13 @@ async function loadDevWindow(window: BrowserWindow): Promise<void> {
 }
 
 function createWindow() {
+  // lorra 应用图标(白发蓝瞳动漫少女吉祥物)。
+  // 开发期:相对源码根 build/icon.ico。打包后:resources/build/icon.ico(由 build-app.cjs 复制)。
+  // dev 路径走 pathToFileURL,打包后由 main process 的 process.resourcesPath 解析。
+  // 优先尝试 dev 路径,失败则忽略(Electron 用默认图标,不阻塞启动)。
+  const iconPath = app.isPackaged
+    ? path.join(process.resourcesPath, 'build', 'icon.ico')
+    : path.join(__dirname, '..', '..', 'build', 'icon.ico');
   const window = new BrowserWindow({
     width: 1280,
     height: 800,
@@ -98,13 +105,13 @@ function createWindow() {
     minHeight: 600,
     frame: false,
     backgroundColor: '#fbfaf6',
+    icon: iconPath,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
       nodeIntegration: false,
     },
   });
-
   if (MAIN_WINDOW_DEV_URL) {
     void loadDevWindow(window);
   } else {
