@@ -44,9 +44,7 @@ export const Sidebar = memo(function Sidebar(props: SidebarProps): JSX.Element {
     >
       {/* logo 区:品牌标记 + 产品名(参考布局顶栏 logo 位)。 */}
       <div className="flex h-12 shrink-0 items-center gap-2.5 border-b border-line px-3.5">
-        <span className="sidebar-logo" aria-hidden="true">
-          L
-        </span>
+        <span className="sidebar-logo" aria-hidden="true" />
         <div className="min-w-0">
           <p className="sidebar-brand m-0">lorra</p>
           <p className="sidebar-tagline m-0">{t('sidebar.tagline')}</p>

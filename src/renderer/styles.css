@@ -290,19 +290,18 @@ button:focus-visible, textarea:focus-visible, a:focus-visible {
 }
 .workspace-tab-add:hover { background: rgb(var(--ink-warm) / .08); color: rgb(var(--ink-warm)); }
 
-/* ── 侧栏组件化(2026-08-07):logo 区 + 快捷操作 + 底部工作区条 ── */
+/* ── 侧栏组件化(2026-08-07):logo 区 + 快捷操作 + 底部工作区条 ──
+ 2026-08-18:logo 位改显示品牌图标(用户指定源图生成的 icon-32.png),
+ 圆角方底保留,不再渲染字母。 */
 .sidebar-logo {
   width: 28px;
   height: 28px;
   flex: none;
-  display: grid;
-  place-items: center;
+  display: block;
   border-radius: var(--radius-sm);
-  background: rgb(var(--ink-warm));
-  color: rgb(var(--paper));
-  font-family: Georgia, serif;
-  font-size: 14px;
-  font-weight: 700;
+  background-image: url('../../build/icon-32.png');
+  background-size: cover;
+  background-position: center;
 }
 .sidebar-brand { font-size: 13px; font-weight: 650; line-height: 1.2; }
 .sidebar-tagline { font-size: 10px; color: rgb(var(--ink-muted)); line-height: 1.3; }
@@ -379,7 +378,7 @@ button:focus-visible, textarea:focus-visible, a:focus-visible {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.dark .sidebar-logo { background: rgb(var(--accent-strong)); }
+.dark .sidebar-logo { background-color: rgb(var(--accent-strong)); }
 .dark .sidebar-quick { background: rgb(var(--panel)); border-color: #4a463e; }
 .dark .sidebar-workspace:hover { background: rgb(var(--panel)); }
 .dark .sidebar-workspace-mark { background: rgb(var(--accent-soft)); color: rgb(var(--accent)); }

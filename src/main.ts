@@ -91,12 +91,13 @@ async function loadDevWindow(window: BrowserWindow): Promise<void> {
 }
 
 function createWindow() {
-  // lorra 应用图标(白发蓝瞳动漫少女吉祥物)。
-  // 开发期:相对源码根 build/icon.ico。打包后:resources/build/icon.ico(由 build-app.cjs 复制)。
-  // dev 路径走 pathToFileURL,打包后由 main process 的 process.resourcesPath 解析。
-  // 优先尝试 dev 路径,失败则忽略(Electron 用默认图标,不阻塞启动)。
+  // lorra 应用图标(2026-08-18 用户指定:白发蓝瞳动漫少女,见 build/icon-source.jpg)。
+  // 开发期:相对源码根 build/icon.ico。打包后:forge extraResource 把 build/icon.ico
+  // 复制到 resources/icon.ico(旧注释的 resources/build/icon.ico 已失效,
+  // Forge Vite 插件只打包 .vite + package.json)。
+  // 路径解析失败则忽略(Electron 用 exe 内嵌图标,不阻塞启动)。
   const iconPath = app.isPackaged
-    ? path.join(process.resourcesPath, 'build', 'icon.ico')
+    ? path.join(process.resourcesPath, 'icon.ico')
     : path.join(__dirname, '..', '..', 'build', 'icon.ico');
   const window = new BrowserWindow({
     width: 1280,

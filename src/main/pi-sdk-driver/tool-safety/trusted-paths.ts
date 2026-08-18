@@ -9,12 +9,15 @@ export interface TrustedPathsOpts {
 
 /** 可信目录的 form 归一:与 target 的 realpath 同形式(CI/Windows 上 realpath
  * 可能返回 \\?\ 前缀或 8.3 短名,词法目录与之不匹配会让可信前缀判定误拒)。
+ * 必须用 native 实现——拦截器的 target 来自 async fs.realpath(native,
+ * GetFinalPathNameByHandle → 长名/带 \\?\ 前缀),而 realpathSync(JS 实现)
+ * 保留输入形式(短名 RUNNER~1 不展开),两者同路径会给出不同字符串。
  * 仅归一目录侧——target 由调用方传 realpath,保持原样;junction 逃逸语义
  * (realpath 落库外 → 不可信)不受影响。目录不存在时回退词法(可信读取目标
  * 存在 ⟹ 其所在可信目录必存在,回退仅覆盖直接单元测试的词法用例)。 */
 function canonicalDir(p: string): string {
   try {
-    return realpathSync(p);
+    return realpathSync.native(p);
   } catch {
     return p;
   }
