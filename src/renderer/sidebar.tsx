@@ -5,12 +5,42 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { cn } from '@/lib/utils';
 import { FileTree } from './file-tree';
 import { useT } from './lib/i18n';
+import type { SessionIndicator } from './reducer';
 
 const WORKSPACE_ROOT_ID = 'ws-root';
+
+/** 指示灯态 → i18n 词条(aria/tooltip 文案)。 */
+const INDICATOR_LABEL_KEY = {
+  running: 'sidebar.indicator.running',
+  idle: 'sidebar.indicator.idle',
+  stuck: 'sidebar.indicator.stuck',
+  'never-run': 'sidebar.indicator.neverRun',
+} as const;
+
+/** 会话状态指示灯(红=卡住,黄=空闲,绿=运行中,灰=未运行)。 */
+function SessionIndicatorDot({
+  state,
+  label,
+}: {
+  state: SessionIndicator;
+  label: string;
+}): JSX.Element {
+  return (
+    <span
+      className="session-indicator"
+      data-state={state}
+      role="img"
+      aria-label={label}
+      title={label}
+    />
+  );
+}
 
 interface SidebarProps {
   activeSessionId: string | null;
   sessionHistory: LorraSessionInfo[];
+  /** 会话状态指示灯(sessionId → 态):绿=运行中,黄=空闲,红=卡住,灰=未运行。 */
+  sessionIndicators: Record<string, SessionIndicator>;
   sessionBootstrapping: boolean;
   activeFileId: string | null;
   showHiddenFiles?: boolean;
@@ -35,6 +65,9 @@ interface SidebarProps {
 export const Sidebar = memo(function Sidebar(props: SidebarProps): JSX.Element {
   const t = useT();
   const activeSummary = props.sessionHistory.find((s) => s.id === props.activeSessionId);
+  const activeIndicator: SessionIndicator = props.activeSessionId
+    ? (props.sessionIndicators[props.activeSessionId] ?? 'never-run')
+    : 'never-run';
 
   return (
     // left-pane 仅作窄屏响应式隐藏钩子(styles.css @media)。
@@ -95,8 +128,14 @@ export const Sidebar = memo(function Sidebar(props: SidebarProps): JSX.Element {
           <nav aria-label={t('sidebar.sessionList')} className="flex min-w-0 flex-col gap-0.5">
             {props.activeSessionId && (
               <button className={navRow(true)} type="button">
-                <span className="w-full min-w-0 truncate text-[13px]">
-                  {activeSummary?.firstMessage || t('sidebar.currentSession')}
+                <span className="flex w-full min-w-0 items-center gap-1.5">
+                  <span className="min-w-0 flex-1 truncate text-[13px]">
+                    {activeSummary?.firstMessage || t('sidebar.currentSession')}
+                  </span>
+                  <SessionIndicatorDot
+                    state={activeIndicator}
+                    label={t(INDICATOR_LABEL_KEY[activeIndicator])}
+                  />
                 </span>
                 <time className="text-[10px] text-ink-muted">
                   {activeSummary
@@ -107,21 +146,31 @@ export const Sidebar = memo(function Sidebar(props: SidebarProps): JSX.Element {
             )}
             {props.sessionHistory
               .filter((session) => session.id !== props.activeSessionId)
-              .map((session) => (
-                <button
-                  key={session.id}
-                  className={navRow(false)}
-                  type="button"
-                  onClick={() => props.onOpenSession(session.id)}
-                >
-                  <span className="w-full min-w-0 truncate text-[13px]">
-                    {session.firstMessage || session.name || session.id}
-                  </span>
-                  <time className="text-[10px] text-ink-muted">
-                    {t('sidebar.messageCount', { count: session.messageCount })}
-                  </time>
-                </button>
-              ))}
+              .map((session) => {
+                const indicator: SessionIndicator =
+                  props.sessionIndicators[session.id] ?? 'never-run';
+                return (
+                  <button
+                    key={session.id}
+                    className={navRow(false)}
+                    type="button"
+                    onClick={() => props.onOpenSession(session.id)}
+                  >
+                    <span className="flex w-full min-w-0 items-center gap-1.5">
+                      <span className="min-w-0 flex-1 truncate text-[13px]">
+                        {session.firstMessage || session.name || session.id}
+                      </span>
+                      <SessionIndicatorDot
+                        state={indicator}
+                        label={t(INDICATOR_LABEL_KEY[indicator])}
+                      />
+                    </span>
+                    <time className="text-[10px] text-ink-muted">
+                      {t('sidebar.messageCount', { count: session.messageCount })}
+                    </time>
+                  </button>
+                );
+              })}
             {!props.activeSessionId && props.sessionBootstrapping && (
               <p className="px-2.5 py-1 text-xs text-ink-tertiary">
                 {t('sidebar.loadingSessions')}

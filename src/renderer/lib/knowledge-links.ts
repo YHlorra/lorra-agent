@@ -9,7 +9,8 @@
  * 无 → broken:'missing'(目标不存在);非 knowledge 类别同标题不计数。
  * - active 优先于 archived 同名:同名存活条目不算断链。
  *
- * 纯函数、零 React 依赖;记忆页 MemoryCard 与单元测试共用。
+ * 纯函数、零 React 依赖;记忆页与单元测试共用(MemoryCard 已于 2026-08-18
+ * 移除,引用收敛到此模块)。
  */
 import type { MemoryEntry } from '../../shared/memory-schema';
 import { WIKILINK_RE } from './remark-obsidian';

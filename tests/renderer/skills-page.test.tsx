@@ -145,6 +145,7 @@ interface SkillsLorraMock extends LorraMock {
     checkUpdates: Mock;
     updateAll: Mock;
     setWsEnabled: Mock;
+    create: Mock;
   };
 }
 
@@ -168,6 +169,10 @@ function installSkillsLorraMock(): SkillsLorraMock {
     checkUpdates: vi.fn().mockResolvedValue({ ok: true, value: {} }),
     updateAll: vi.fn().mockResolvedValue({ ok: true, value: { updated: [], skipped: [] } }),
     setWsEnabled: vi.fn().mockResolvedValue({ ok: true, value: undefined }),
+    create: vi.fn().mockResolvedValue({
+      ok: true,
+      value: { name: 'my-flow', filePath: 'E:/ws/.lorra/skills/my-flow.md' },
+    }),
   };
   Object.defineProperty(window, 'lorra', { value: m, writable: true, configurable: true });
   return m;
@@ -1034,5 +1039,80 @@ describe('Requirement: 加载态 / 错误态 / 空态', () => {
     expect(empty.textContent).toMatch(/(技能|安装)/);
     expect(screen.queryByTestId('skills-table')).toBeNull();
     expect(screen.queryByTestId('skills-hero-card')).toBeNull();
+  });
+});
+
+// =========================================================================
+// Requirement: 手动新建技能(2026-08-18)——页头按钮 → 弹层 → create IPC → refresh
+// =========================================================================
+
+describe('Requirement: 手动新建技能(create IPC)', () => {
+  it('Scenario 点「新建技能」→ 弹层出现;输入 name/content → 点「创建」→ create IPC + 重拉 xray', async () => {
+    const user = userEvent.setup();
+    await renderPage(oneSkillXray());
+
+    await user.click(screen.getByTestId('skills-new'));
+    const dialog = await screen.findByTestId('skills-create-dialog');
+    expect(dialog).toBeInTheDocument();
+
+    const nameInput = within(dialog).getByTestId('skills-create-name');
+    const contentInput = within(dialog).getByTestId('skills-create-content');
+    await user.type(nameInput, 'my-flow');
+    await user.type(contentInput, '---\nname: my-flow\ndescription: 测试\n---\n\n正文');
+
+    const confirm = within(dialog).getByTestId('skills-create-confirm');
+    expect(confirm).not.toBeDisabled();
+    await user.click(confirm);
+
+    // create IPC 携带 name+content;成功后 refresh 重拉 xray。
+    expect(mock.skills.create).toHaveBeenCalledWith({
+      name: 'my-flow',
+      content: '---\nname: my-flow\ndescription: 测试\n---\n\n正文',
+    });
+    await waitFor(() => expect(mock.skills.xray).toHaveBeenCalledTimes(2));
+    // 成功提示条展示「已创建 my-flow」;弹层关闭。
+    await waitFor(() =>
+      expect(screen.getByTestId('skills-create-result')).toHaveTextContent('已创建 my-flow'),
+    );
+    expect(screen.queryByTestId('skills-create-dialog')).toBeNull();
+  });
+
+  it('Scenario name 或 content 任一为空 → 「创建」禁用', async () => {
+    const user = userEvent.setup();
+    await renderPage(oneSkillXray());
+
+    await user.click(screen.getByTestId('skills-new'));
+    const dialog = await screen.findByTestId('skills-create-dialog');
+    const confirm = within(dialog).getByTestId('skills-create-confirm');
+    expect(confirm).toBeDisabled();
+
+    const nameInput = within(dialog).getByTestId('skills-create-name');
+    await user.type(nameInput, 'my-flow');
+    // 只有 name,content 为空 → 仍禁用。
+    expect(confirm).toBeDisabled();
+
+    const contentInput = within(dialog).getByTestId('skills-create-content');
+    await user.type(contentInput, '正文');
+    expect(confirm).not.toBeDisabled();
+  });
+
+  it('Scenario create 返回 Err → 弹层内显示错误,弹层不关闭', async () => {
+    const user = userEvent.setup();
+    mock.skills.create.mockResolvedValue({
+      ok: false,
+      error: { code: 'skill-already-exists', message: '技能已存在' },
+    });
+    await renderPage(oneSkillXray());
+
+    await user.click(screen.getByTestId('skills-new'));
+    const dialog = await screen.findByTestId('skills-create-dialog');
+    await user.type(within(dialog).getByTestId('skills-create-name'), 'dup');
+    await user.type(within(dialog).getByTestId('skills-create-content'), '正文');
+    await user.click(within(dialog).getByTestId('skills-create-confirm'));
+
+    expect(await screen.findByTestId('skills-create-error')).toHaveTextContent('技能已存在');
+    expect(screen.getByTestId('skills-create-dialog')).toBeInTheDocument();
+    // 失败不重拉 xray。
+    expect(mock.skills.xray).toHaveBeenCalledTimes(1);
   });
 });

@@ -7,7 +7,6 @@ import { createOfkHotSyncer } from '../ofk/ofk-hot-syncer';
 import type { LorraDriver } from '../pi-sdk-driver';
 import { LorraDriver as LorraDriverImpl } from '../pi-sdk-driver';
 import { createSessionPersistence } from '../pi-sdk-driver/session-persistence';
-import { seedLorraMetaSkill } from '../skills/skill-meta-seed';
 
 /**
  * 会话自动记忆提取总开关:false 时 onSessionActivity 只跑事实
@@ -22,16 +21,18 @@ const MEMORY_EXTRACTION_ENABLED = true;
  * workspace" action so the chat bar and provider entry actually attach to a
  * real session even when the user picks a workspace after first launch.
  *
- * IPC handlers read this through getters; the driver is rebuilt (old one
- * shutdown) whenever the workspace changes so per-workspace resources
- * (SessionManager, ExtensionRunner) do not leak across switches.
+ * Driver 池(D4, 2026-08-19 session-reliability-multi-session):
+ * 每工作区一个持久 `LorraDriver` 条目(池化,不随切换销毁)。切换工作区只是
+ * 移动 active 指针,旧 driver 的后台会话继续运行;切回时复用池内条目并自动
+ * 把 wc 重新绑定到该 driver 的 router(后台进度切回即见)。全量收尾由
+ * `disposeAll` 在 `main.ts` before-quit 统一执行。
  *
  * `attachWindow(wc)` is the bridge between Electron's BrowserWindow and the
  * driver-side EventRouter. Without it, agent events emitted by the SDK have
  * zero subscribers and are dropped before reaching the renderer — the
  * "input clears, conversation never starts" symptom. The runtime holds the
- * wc references so they automatically re-attach when the driver rebuilds on
- * a workspace switch (the new driver has its own empty attachedWebContents).
+ * wc references so they automatically re-attach when the active driver
+ * changes on a workspace switch.
  */
 export interface WorkspaceRuntime {
   /** Current workspace path; null on first launch before any pick. */
@@ -40,31 +41,38 @@ export interface WorkspaceRuntime {
   getActiveDriver(): LorraDriver | null;
   /** Subscribe to activation changes. Returns an unsubscribe function. */
   onChange(cb: (path: string | null) => void): () => void;
-  /** Activate a workspace, building a fresh driver. */
+  /** Activate a workspace, building a fresh driver (or reusing the pool). */
   activate(workspacePath: string): Promise<void>;
   /** Drop the active workspace; used by the titlebar switch button. */
   deactivate(): Promise<void>;
   /**
+   * Shut down every pooled driver and dispose every extractor. Called by
+   * `main.ts` on `before-quit`; the app is exiting so all resources are
+   * released.
+   */
+  disposeAll(): Promise<void>;
+  /**
    * Register a window so its webContents receives agent events from the
-   * current driver (and re-binds when the driver is rebuilt on workspace
-   * switch). Idempotent per wc; returns a detach function for symmetry.
+   * current driver (and re-binds when the active driver changes on
+   * workspace switch). Idempotent per wc; returns a detach function.
    */
   attachWindow(wc: WebContents): () => void;
+}
+
+/** 池内单工作区条目(D4):driver 与其热记忆提取器同生命周期。 */
+interface WorkspaceEntry {
+  driver: LorraDriver;
+  extractor: HotMemoryExtractor | null;
 }
 
 export function createWorkspaceRuntime(): WorkspaceRuntime {
   let currentPath: string | null = null;
   let currentDriver: LorraDriver | null = null;
+  // D4:工作区 → 持久条目池。切换只动 active 指针,池内 driver/extractor 存活。
+  const pool = new Map<string, WorkspaceEntry>();
   // OFK 热同步:会话活动 → 防抖写概念文档(facts.db 已随 P2 删除)。
   const ofkHotSyncer = createOfkHotSyncer();
-  // 会话自动记忆提取器(H3 dispose 主入口):工作区切换时旧 extractor 的
-  // pending 计时器必须被清,否则旧工作区会话的活动仍会触发提取。
-  let currentExtractor: HotMemoryExtractor | null = null;
   const listeners = new Set<(path: string | null) => void>();
-  // Self-reference so callbacks registered during activate resolve
-  // drivers through the public getter, not a captured (possibly stale)
-  // closure variable.
-  let self: WorkspaceRuntime | undefined;
   // Windows (webContents) registered by main.ts. Driver is rebuilt on
   // workspace switch, so the runtime — not any single driver — owns this
   // list and rebinds wc → new driver on every setActiveDriver.
@@ -103,25 +111,24 @@ export function createWorkspaceRuntime(): WorkspaceRuntime {
       };
     },
     async activate(workspacePath: string): Promise<void> {
-      // H3 生命周期收口:工作区切换(直接 activate)时旧 extractor 必须先 dispose
-      // (全仓无 runtime.deactivate 调用方,这里是主入口)——否则旧工作区 pending
-      // 计时器在切换后仍触发提取。
-      currentExtractor?.dispose();
-      currentExtractor = null;
-      if (currentDriver) {
-        try {
-          await currentDriver.shutdownAll();
-        } catch {
-          // Driver teardown is best-effort; we still rebuild on top.
-        }
+      // D4:池中命中 → 直接置 active,不重建 driver、不 shutdown 后台会话。
+      const pooled = pool.get(workspacePath);
+      if (pooled) {
+        setActiveDriver(workspacePath, pooled.driver);
+        return;
       }
-      // 记忆维护技能播种:工作区激活时一次,缺失才写、存在原样用。
+      // 记忆维护技能播种:工作区首次激活时一次,缺失才写、存在原样用。
       // 生成链路外(技能由模型读取对照),失败静默——不阻塞工作区激活。
       seedMemoryMaintenanceSkill(workspacePath);
       // OFK 摘要编译技能播种:同 write-if-missing 纪律,失败静默。
       seedOfkDigestSkill(workspacePath);
-      // lorra 元技能播种(可发现,用户经 /skill lorra-meta-skill 调用):失败静默,不阻塞激活。
-      seedLorraMetaSkill(workspacePath);
+      // lorra 元技能已迁全局路径(2026-08-18):由启动期 seedBuiltinSkills 落
+      // ~/.lorra/skills/,此处不再 per-workspace 播种。(→删除该段)
+      // D6(并发归属):池化后后台工作区的会话事件必须回到「自己的 driver」,
+      // 不能用全局 active driver 解析——每个 activate 闭包持一个本工作区
+      // driverRef,persistence/extractor 回调经它路由(persistence 先于 driver
+      // 构造,故先声明后赋值)。
+      let driverRef: LorraDriver | null = null;
       const persistence = await createSessionPersistence({
         workspacePath,
         // Chromium network stack (system trust store + proxy handling);
@@ -129,34 +136,32 @@ export function createWorkspaceRuntime(): WorkspaceRuntime {
         // networks where net.fetch succeeds.
         fetcher: (url, init) => net.fetch(url, init),
         emitBlocked: (payload) => {
-          const driver = self?.getActiveDriver();
-          const activeSessionId = driver?.getActiveSessionId();
-          if (!activeSessionId || !driver) return;
-          driver.emitToolBlocked(activeSessionId, payload);
+          const driver = driverRef;
+          if (!driver || !payload.sessionId) return;
+          driver.emitToolBlocked(payload.sessionId, payload);
         },
-        // 编辑历史:driver 在 activate 之后才构造,钩子经 getter 惰性解析。
+        // 编辑历史:driver 在 activate 之后才构造,钩子经 driverRef 惰性解析。
         recordEditBefore: (payload) => {
-          self?.getActiveDriver()?.recordEditBefore(payload);
+          driverRef?.recordEditBefore(payload);
         },
         finalizeEdit: (payload) => {
-          self?.getActiveDriver()?.finalizeEdit(payload);
+          driverRef?.finalizeEdit(payload);
         },
-        // 分级审批:同上,经 getter 解析到 driver 的审批注册表;
+        // 分级审批:同上,经 driverRef 解析到本工作区 driver 的审批注册表;
         // 返回裁决 Promise(拦截器 await 挂起直到用户裁决)。
         requestApproval: (payload) =>
-          self?.getActiveDriver()?.requestApproval(payload) ?? Promise.resolve('deny'),
-        checkApproved: (toolName, target) =>
-          self?.getActiveDriver()?.checkApproved(toolName, target) ?? false,
+          driverRef?.requestApproval(payload) ?? Promise.resolve('deny'),
+        checkApproved: (toolName, target) => driverRef?.checkApproved(toolName, target) ?? false,
         // 记忆写入成功(/D6):memory 工具 propose/update 成功 →
         // 经 driver router 发 'memory.recorded' 事件(渲染端只读通知条消费)。
         emitMemoryRecorded: (payload) => {
-          self?.getActiveDriver()?.emitMemoryRecorded(payload);
+          driverRef?.emitMemoryRecorded(payload);
         },
       });
       // 会话自动记忆提取器:活动事件防抖 → 增量段模型提取 → 落库。
       // store 经动态 import 装载共享单例(node:sqlite 不进 vitest client 测试图,
       // 与 propose-memory-tool 注册处同款纪律);emitRecorded 经 driver router
-      // 发 'memory.recorded'(渲染端通知条),惰性 getter 解析(文件既有模式)。
+      // 发 'memory.recorded'(渲染端通知条),惰性 driverRef 解析(文件既有模式)。
       const hotMemoryExtractor = createHotMemoryExtractor(workspacePath, {
         invoke: createCompileModelInvoke(),
         getStore: async () => {
@@ -166,13 +171,10 @@ export function createWorkspaceRuntime(): WorkspaceRuntime {
           return shared.value;
         },
         emitRecorded: (payload) => {
-          self?.getActiveDriver()?.emitMemoryRecorded(payload);
+          driverRef?.emitMemoryRecorded(payload);
         },
         workspace: workspacePath,
       });
-      // H3:activate 期间立即接管(dispose 主入口在 activate 开头,此处确保
-      // 新 extractor 与当前工作区绑定,onSessionActivity 经它触发)。
-      currentExtractor = hotMemoryExtractor;
       const driver = new LorraDriverImpl({
         workspacePath,
         persistence,
@@ -186,19 +188,28 @@ export function createWorkspaceRuntime(): WorkspaceRuntime {
           if (MEMORY_EXTRACTION_ENABLED) hotMemoryExtractor.trigger(sessionFile);
         },
       });
+      driverRef = driver;
+      // D4:并入池;提取器随条目存活,disposeAll 时统一清(不随切换销毁)。
+      pool.set(workspacePath, { driver, extractor: hotMemoryExtractor });
       setActiveDriver(workspacePath, driver);
     },
     async deactivate(): Promise<void> {
-      // H3 防御性双保险:显式 deactivate 时也清 extractor(activate 开头是主入口)。
-      currentExtractor?.dispose();
-      currentExtractor = null;
-      if (currentDriver) {
+      // D4:deactivate 仅清 active 指针;池内 driver/extractor 保持存活
+      // (后台会话继续运行,切回即复用)。
+      setActiveDriver(null, null);
+    },
+    async disposeAll(): Promise<void> {
+      // D4:全量收尾(before-quit 主入口)。先清提取器停掉 pending 计时器,
+      // 再 shutdown 各 driver(有界:SessionRegistry.shutdownAll 2s 竞速 + dispose)。
+      for (const entry of pool.values()) {
+        entry.extractor?.dispose();
         try {
-          await currentDriver.shutdownAll();
+          await entry.driver.shutdownAll();
         } catch {
-          // same teardown tolerance as activate
+          // Driver teardown is best-effort; the app is quitting anyway.
         }
       }
+      pool.clear();
       setActiveDriver(null, null);
     },
     attachWindow(wc: WebContents): () => void {
@@ -218,6 +229,5 @@ export function createWorkspaceRuntime(): WorkspaceRuntime {
       return cleanup;
     },
   };
-  self = runtime;
   return runtime;
 }

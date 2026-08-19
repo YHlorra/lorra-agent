@@ -18,14 +18,6 @@ import { SafeMarkdown } from './safe-markdown';
 import { ThinkingCard } from './thinking-card';
 import { isWriteTool, ToolCard } from './tool-card';
 
-const STATUS_LABEL_KEY: Record<SessionStatus, MessageKey> = {
-  idle: 'chat.status.idle',
-  streaming: 'chat.status.streaming',
-  'tool-running': 'chat.status.toolRunning',
-  aborted: 'chat.status.aborted',
-  errored: 'chat.status.errored',
-};
-
 /** 记忆通知条自动消退时长(ms):超时后逐条移除;下一事件到来时保留至事件流覆盖。 */
 const NOTICE_AUTO_DISMISS_MS = 6000;
 
@@ -35,6 +27,10 @@ interface ChatPaneProps {
   modelAvailable: boolean;
   modelLoading: boolean;
   defaultModelName: string | null;
+  /** 当前默认模型 id(胶囊仓高亮);null = 无默认。 */
+  defaultCurrent?: { providerId: string; modelId: string } | null;
+  /** 切换模型(App 层 setDefault + refresh),透传 Composer 胶囊。 */
+  onModelChanged?: (providerId: string, modelId: string) => Promise<void>;
   inlineError: string;
   onOpenProviders: () => void;
   // App 的 sendMessage 实际返回「是否被 driver 受理」供消息队列出队解锁(2026-08-17);
@@ -164,26 +160,7 @@ export function ChatPane(props: ChatPaneProps): JSX.Element {
   return (
     <section className="chat-pane" aria-label={t('chat.regionLabel')}>
       <header className="chat-header">
-        <div>
-          <p className="chat-title">Agent</p>
-          <button
-            type="button"
-            className="model-state-btn"
-            onClick={props.onOpenProviders}
-            aria-label={props.modelAvailable ? t('chat.openProviders') : t('chat.connectModel')}
-          >
-            <span
-              className={`model-state-dot${props.modelAvailable ? '' : ' is-off'}`}
-              aria-hidden="true"
-            />
-            {props.modelAvailable
-              ? (props.defaultModelName ?? t('chat.connected'))
-              : t('chat.connectModel')}
-            {props.status !== 'idle' && (
-              <span className="chat-status-chip">{t(STATUS_LABEL_KEY[props.status])}</span>
-            )}
-          </button>
-        </div>
+        <p className="chat-title">Agent</p>
         <button type="button" aria-label={t('chat.newAgentChat')} onClick={props.onCreateSession}>
           <Plus className="h-4 w-4" aria-hidden="true" />
         </button>
@@ -275,7 +252,8 @@ export function ChatPane(props: ChatPaneProps): JSX.Element {
         // 空会话且无模型时 chat-empty-cta 已传达同一信息,不再重复渲染底部 banner。
         modelUnavailableBanner={!props.modelAvailable && hasEvents}
         defaultModelName={props.defaultModelName}
-        emptyStateMessage={hasEvents || !props.modelAvailable ? '' : t('chat.waitingAi')}
+        defaultCurrent={props.defaultCurrent}
+        onModelChanged={props.onModelChanged}
         references={props.references}
         onClearReferences={props.onClearReferences}
         queue={props.queue}

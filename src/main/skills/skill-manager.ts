@@ -1,5 +1,14 @@
 import type { Dirent, Stats } from 'node:fs';
-import { existsSync, lstatSync, readdirSync, realpathSync, statSync, unlinkSync } from 'node:fs';
+import {
+  existsSync,
+  lstatSync,
+  mkdirSync,
+  readdirSync,
+  realpathSync,
+  statSync,
+  unlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -10,6 +19,7 @@ import { err, ok, toLorraError } from '../../shared/result';
 import type {
   CollectResult,
   InstallResult,
+  SkillCreatedResult,
   SkillGitStatus,
   SkillReadResult,
   SkillXray,
@@ -363,6 +373,36 @@ export async function installSkill(gitUrl: string): Promise<Result<InstallResult
   const settings = await readSettings();
   const collectionRoot = getSkillCollectionRoot(settings);
   return gitInstallSkill(gitUrl, collectionRoot);
+}
+
+/**
+ * 手动新建技能（2026-08-18）：写 <ws>/.lorra/skills/<name>.md（普通技能，非 git/收集链路）。
+ * - name 校验 = kebab-case 正则（小写 a-z0-9 + 连字符，首末非连字符，1-64）；与 SDK
+ * Agent Skills standard 一致。IPC 层与 manager 双校验（IPC 先挡，manager 兜底）。
+ * - 目标已存在 → skill-already-exists（防覆写用户文件）。
+ * - mkdirSync(recursive) + writeFileSync utf8；IO 失败 → skills-create-failed。
+ */
+export async function createSkill(
+  name: string,
+  content: string,
+  opts: { wsPath?: string } = {},
+): Promise<Result<SkillCreatedResult>> {
+  if (typeof name !== 'string' || !/^[a-z0-9][a-z0-9-]{0,62}[a-z0-9]$/.test(name)) {
+    return err({ code: 'invalid-skill-name', message: '技能名称无效' });
+  }
+  const wsRes = await resolveWorkspacePath(opts.wsPath);
+  if (wsRes.isErr()) return wsRes;
+  const target = path.join(wsRes.value, '.lorra', 'skills', `${name}.md`);
+  try {
+    if (existsSync(target)) {
+      return err({ code: 'skill-already-exists', message: '技能已存在' });
+    }
+    mkdirSync(path.dirname(target), { recursive: true });
+    writeFileSync(target, content, 'utf8');
+    return ok({ name, filePath: target });
+  } catch (cause) {
+    return err(toLorraError(cause, 'skills-create-failed'));
+  }
 }
 
 /** 检查更新：收集根全部 git 技能 fetch 后判定 behind/dirty（checkUpdates 通道才网络 fetch）。 */

@@ -280,6 +280,9 @@ describe('工作台', () => {
 
   it('Given 打开 providers 视图 When 点击「返回工作区」 Then workspace-grid 重新出现', async () => {
     const user = userEvent.setup();
+    // 当前唯一的对话区入口 = 空状态 CTA「连接模型」(顶栏入口已随内联模型
+    // 胶囊改版移除,2026-08-19);置空可用模型让 CTA 出现。
+    vi.spyOn(window.lorra.models, 'getAvailable').mockResolvedValue({ ok: true, value: [] });
     render(<App />);
 
     // 起始:workspace 视图,Agent 对话 region 存在。
@@ -287,8 +290,9 @@ describe('工作台', () => {
     const composerBefore = screen.getByRole('textbox', { name: '向 Agent 提问' });
     expect(composerBefore).toBeInTheDocument();
 
-    // 进入 providers 视图:点击 chat-header 上的「打开模型供应商配置」。
-    await user.click(screen.getByRole('button', { name: '打开模型供应商配置' }));
+    // 进入 providers 视图:空状态 CTA 的「连接模型」按钮(顶栏入口已随
+    // 内联模型胶囊改版移除,2026-08-19)。
+    await user.click(screen.getByRole('button', { name: '连接模型' }));
 
     // 切出 workspace 后 textarea 消失,providers 目录出现。
     await waitFor(() =>
@@ -532,6 +536,39 @@ describe('工作台', () => {
     // 气泡容器存在,user 气泡带藏蓝底类。
     expect(document.querySelectorAll('.message .message-bubble')).toHaveLength(2);
     expect(document.querySelector('.message.user .message-bubble')).not.toBeNull();
+  });
+
+  it('Given agent 工作中(tool-running) When 渲染 Then 模型切换胶囊常驻,思考环仅作状态提示', async () => {
+    let subscribeCb: ((event: unknown) => void) | undefined;
+    vi.spyOn(window.lorra.events, 'subscribe').mockImplementation((cb) => {
+      subscribeCb = cb;
+      return () => {};
+    });
+    vi.spyOn(window.lorra.session, 'continueRecent').mockResolvedValue({
+      ok: true,
+      value: { sessionId: 's-model-busy' },
+    });
+
+    render(<App />);
+    await screen.findByRole('textbox', { name: '向 Agent 提问' });
+
+    // 空闲态:模型胶囊可见。
+    expect(screen.getByRole('button', { name: '切换模型' })).toBeInTheDocument();
+
+    // 进入工具运行态:模型胶囊不被思考环替换(2026-08-19 修复),思考环/文案并排提示。
+    // subscribeCb 触发的是异步 React 批处理 dispatch,须 await 状态落定(findBy),
+    // 同步 getByText 会拿到未重渲染的 DOM。
+    subscribeCb?.({
+      sessionId: 's-model-busy',
+      eventId: 'evt-busy',
+      seq: 1,
+      ts: Date.now(),
+      type: 'session.status',
+      status: 'tool-running',
+    });
+    expect(screen.getByRole('button', { name: '切换模型' })).toBeInTheDocument();
+    expect(await screen.findByText('正在使用工具')).toBeInTheDocument();
+    expect(document.querySelector('.composer-spinner')).not.toBeNull();
   });
 
   it('Given 工作台已激活 When 点击图标栏「模型配置」 Then 切换到模型配置页', async () => {

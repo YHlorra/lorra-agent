@@ -42,12 +42,19 @@ import { lorraConfigDir } from '../pi-sdk-driver/lorra-config-dir';
 
 // ---- 常量 ----
 
-/** 系统剔除种子（复盘种子）：灰标「内部·未注入」，不进「有问题」计数、不进预算。 */
-export const SYSTEM_MANAGED_SKILL_NAMES = [
-  'memory-maintenance',
+/** 系统管理种子（per-workspace 播种链路专属）：灰标「内部·未注入」，不进「有问题」计数、不进预算。 */
+export const SYSTEM_MANAGED_SKILL_NAMES = ['memory-maintenance', 'ofk-digest'] as const;
+
+/**
+ * 种子文件名集合 = SYSTEM_MANAGED ∪ [daily-review, deep-review]。
+ * 复盘/meta 种子自 2026-08-18 起归 lorra 全局库（builtin-skill-seeder），UI 以普通技能
+ * 出现（systemManaged=false，可手动触发）；但收集器仍按「lorra 写的种子」跳过（不收集、
+ * 不动位置）——与 UI 灰标解耦，收集语义不变。skill-manager 的启停拒绝只认 SYSTEM_MANAGED。
+ */
+export const SEED_FILE_SKILL_NAMES = [
+  ...SYSTEM_MANAGED_SKILL_NAMES,
   'daily-review',
   'deep-review',
-  'ofk-digest',
 ] as const;
 
 /** 遍历器最大深度（防 symlink 环卡死主进程，design Sec #4）。 */
@@ -126,8 +133,9 @@ export function getSkillCollectionRoot(settings: { skillCollectionRoot?: string 
 }
 
 /**
- * 五源路径集（顺序即去重优先级）：收集根 → 祖先 .agents/skills → ~/.lorra/skills（lorra 全局库）→
- * ~/.agents/skills（user 源）→ <ws>/.lorra/skills（工作区，最后，与 SDK additionalSkillPaths 一致）。
+ * 六源路径集（顺序即去重优先级）：收集根 → 祖先 .agents/skills → ~/.lorra/skills（lorra 全局库）→
+ * ~/.agents/skills（user 源）→ ~/.claude/skills（claude 源）→ <ws>/.lorra/skills（工作区，最后，
+ * 与 SDK additionalSkillPaths 一致）。
  * 收集根最前：被收集技能 winner 优先（与 SDK resolve 次序同构——收集根即 additionalSkillPaths 首位，
  * resource-loader.js:329-333 实证 additionalSkillPaths 排在工作区前）；与用户源同路径时去重
  * （收集根默认即 ~/.agents/skills）。
@@ -140,12 +148,14 @@ export function getSkillSourcePaths(wsPath: string, opts: SkillScanOpts = {}): s
     ? path.resolve(opts.collectionRoot)
     : path.join(home, '.agents', 'skills');
   const userSkills = path.join(home, '.agents', 'skills');
+  const claudeSkills = path.join(home, '.claude', 'skills');
   return [
     // 收集根与用户源同路径时只列一次（默认值即同路径）。
     ...(isSamePath(collectionRoot, userSkills) ? [] : [collectionRoot]),
     ...collectAncestorAgentsSkillDirs(ws, home),
     path.join(lorraConfigDir(), 'skills'),
     userSkills,
+    claudeSkills,
     path.join(ws, '.lorra', 'skills'),
   ];
 }
@@ -163,6 +173,7 @@ function sourceOf(
   const wsSkills = path.join(ws, '.lorra', 'skills');
   const lorraSkills = path.join(lorraConfigDir(), 'skills');
   const userSkills = path.join(home, '.agents', 'skills');
+  const claudeSkills = path.join(home, '.claude', 'skills');
   const root = path.resolve(collectionRoot);
   const p = path.resolve(sourcePath);
   const rootWithSep = root.endsWith(path.sep) ? root : `${root}${path.sep}`;
@@ -171,14 +182,16 @@ function sourceOf(
   if (isSamePath(sourcePath, wsSkills)) return 'workspace';
   if (isSamePath(sourcePath, lorraSkills)) return 'lorra-global';
   if (isSamePath(sourcePath, userSkills)) return 'user';
+  if (isSamePath(sourcePath, claudeSkills)) return 'claude';
   return 'ancestor';
 }
 
-/** scope 映射（D4）：collection/lorra-global/user/agent-plugin → global；workspace/ancestor → project。 */
+/** scope 映射（D4）：collection/lorra-global/user/claude/agent-plugin → global；workspace/ancestor → project。 */
 function scopeOf(source: SkillSource): SkillScope {
   return source === 'collection' ||
     source === 'lorra-global' ||
     source === 'user' ||
+    source === 'claude' ||
     source === 'agent-plugin'
     ? 'global'
     : 'project';

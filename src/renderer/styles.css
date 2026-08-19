@@ -36,6 +36,7 @@
   --line-accent: 208 220 233;   /* #D0DCE9 */
   --overlay: 238 242 247;       /* #EEF2F7 */
   --danger: 181 51 51;          /* #B53333 */
+  --warning: 154 118 36;        /* #9A7624(琥珀/暗金,会话指示灯「空闲」态) */
 
   /* ── 今日视图 token(agent-memory-today-timeline):时间线几何 + 工作区色板 + 时段分布 ── */
   --tl-label: rgb(var(--ink-muted));
@@ -377,6 +378,27 @@ button:focus-visible, textarea:focus-visible, a:focus-visible {
   font-weight: 600;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+/* 会话栏状态指示灯(2026-08-19):绿=运行中,黄=空闲,红=卡住,灰=未运行。 */
+.session-indicator {
+  width: 8px;
+  height: 8px;
+  flex: none;
+  border-radius: 50%;
+  background: rgb(var(--line)); /* never-run 灰(默认) */
+}
+.session-indicator[data-state='running'] { background: rgb(var(--success)); }
+.session-indicator[data-state='idle'] { background: rgb(var(--warning)); }
+.session-indicator[data-state='stuck'] {
+  background: rgb(var(--danger));
+  animation: session-indicator-pulse 1.2s ease-in-out infinite;
+}
+@keyframes session-indicator-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .session-indicator[data-state='stuck'] { animation: none; }
 }
 .dark .sidebar-logo { background-color: rgb(var(--accent-strong)); }
 .dark .sidebar-quick { background: rgb(var(--panel)); border-color: #4a463e; }
@@ -1115,7 +1137,10 @@ button:focus-visible, textarea:focus-visible, a:focus-visible {
 .composer textarea::placeholder { color: #928d84; }
 .composer-actions { display: flex; align-items: center; gap: 8px; padding-top: 8px; border-top: 1px solid #eeebe4; }
 .composer-actions button { min-height: 36px; padding: 0 13px; border: 0; border-radius: var(--radius-sm); font-size: 12px; font-weight: 650; }
-.composer-presence { min-width: 0; display: flex; align-items: center; gap: 7px; color: rgb(var(--muted)); font-size: 11px; }
+/* 2026-08-19:presence 接管剩余宽度(flex:1)自右向左收缩,停止/发送按钮始终钉右侧;
+ 子项(text/胶囊)统一 min-width:0 + ellipsis,避免 busy 时胶囊被思考环/文案挤占换行。 */
+.composer-presence { min-width: 0; flex: 1 1 auto; display: flex; align-items: center; gap: 7px; color: rgb(var(--muted)); font-size: 11px; }
+.composer-presence > span:not(.model-capsule-anchor) { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .composer-shortcut { color: rgb(var(--faint)); font-size: 10px; }
 .composer-status-dot { width: 7px; height: 7px; border-radius: 50%; background: rgb(var(--accent)); }
 .composer-status-dot.is-streaming { animation: status-pulse 1.35s ease-out infinite; }
@@ -1147,15 +1172,28 @@ button:focus-visible, textarea:focus-visible, a:focus-visible {
 }
 .composer-actions .stop-button { margin-left: auto; border: 1px solid #d9a59d; background: #fff8f6; color: #9f342b; }
 .stop-button span { display: inline-block; width: 7px; height: 7px; margin-right: 6px; border-radius: 1px; background: currentColor; }
-.composer-banner strong { font-size: 11px; }
+/* composer 上方的状态提示横幅(命令用法/发送失败/模型缺失等):统一标签与正文字号,
+ 对齐本区域的提示尺寸(context-note / composer-presence 均 11px),2026-08-19 全量校准。 */
+.composer-banner {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  margin: 0 0 8px;
+  padding: 6px 10px;
+  border: 1px solid rgb(var(--line));
+  border-radius: var(--radius-sm);
+  background: rgb(var(--paper));
+  color: rgb(var(--ink-warm));
+}
+.composer-banner strong,
+.composer-banner span {
+  font-size: 11px;
+}
 .composer-banner span { color: #625e56; }
 .composer-banner-warning { border-color: #dec896; background: #faf4e5; }
 .composer-banner-warning strong { color: #755b20; }
 .composer-banner-error { border-color: #ddb0a9; background: #fbefec; }
 .composer-banner-error strong { color: #96372e; }
-.composer-empty-state { display: grid; grid-template-columns: 1fr auto 1fr; gap: 10px; align-items: center; padding: 10px 8px 14px; color: rgb(var(--faint)); font-family: var(--font-serif); font-size: 13px; text-align: center; }
-.composer-empty-state p { margin: 0; }
-.composer-empty-rule { height: 1px; background: #dedad1; }
 
 @keyframes reveal { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: translateY(0); } }
 @keyframes spin { to { transform: rotate(360deg); } }
@@ -1587,6 +1625,57 @@ button:focus-visible, textarea:focus-visible, a:focus-visible {
   background: rgb(var(--ink-warm) / .06);
 }
 
+/* 内联模型切换胶囊仓(2026-08-19):composer presence 里的模型名按钮 + 弹出清单。 */
+.model-capsule-anchor { position: relative; display: inline-flex; align-items: center; min-width: 0; }
+.composer-model-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  color: rgb(var(--ink-warm));
+  font-size: 11px;
+  font-weight: 500;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: rgb(var(--ink-warm) / .06);
+  cursor: pointer;
+  border: 1px solid transparent;
+  /* 2026-08-19 防挤占:盖掉 .composer-actions button 的通用 36px min-height,胶囊
+ 贴合 11px 状态行;max-width + ellipsis 让长模型名收缩为「…」而非换行顶乱布局。 */
+  min-height: 0;
+  max-width: 180px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.composer-model-button:hover { border-color: rgb(var(--ink-warm) / .2); background: rgb(var(--ink-warm) / .1); }
+.composer-model-chevron { color: rgb(var(--muted)); }
+div.model-capsule {
+  /* 选择器用 div.model-capsule(0,1,1)压过 Command 根自带 .w-full/.h-full(0,1,0):
+ 同优先级时按加载顺序,宽度会被压回按钮宽(~132px)、高度被锁在锚点高
+ (~36px → 列表被 flex 压缩到 0px,只剩搜索栏),2026-08-19。 */
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 0;
+  z-index: 40;
+  width: 260px;
+  height: auto;
+  max-height: 360px;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid rgb(var(--line));
+  border-radius: 10px;
+  background: rgb(var(--paper));
+  box-shadow: rgb(0 0 0 / .18) 0 8px 28px;
+  overflow: hidden;
+}
+.model-capsule-item-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* 注意:不要给 [cmdk-list] 加 flex:1 1 auto + min-height:0 —— 在「高度 auto +
+ max-height」的弹层里会把列表压缩到 0px(搜索栏独占,列表全被裁掉),2026-08-19。
+ 列表高度交给其自带的 max-h-[300px] 滚动容器。 */
+.model-capsule-item-provider { color: rgb(var(--faint)); font-size: 11px; white-space: nowrap; }
+.model-capsule .model-capsule-item-current { color: rgb(var(--navy)); }
+.dark .model-capsule { background: rgb(var(--panel)); }
+
 @media (max-width: 1050px) {
   .pc-page { grid-template-columns: 240px 1fr; }
   .pc-content { padding: 18px 18px 80px; }
@@ -1624,6 +1713,7 @@ button:focus-visible, textarea:focus-visible, a:focus-visible {
   --line-accent: 61 57 49;       /* #3D3931 */
   --overlay: 38 35 29;           /* #26231D */
   --danger: 224 112 106;         /* #E0706A */
+  --warning: 201 162 75;         /* #C9A24B */
 
   /* 今日视图 token(深色:浅填充 + 深墨文字, accent/accent-strong 分离教训) */
   --tl-label: rgb(var(--ink-muted));
@@ -1695,7 +1785,6 @@ button:focus-visible, textarea:focus-visible, a:focus-visible {
 .dark .composer-banner-warning strong { color: #d9bc6e; }
 .dark .composer-banner-error { border-color: #7e4a45; background: #3a2725; }
 .dark .composer-banner-error strong { color: #e59a93; }
-.dark .composer-empty-rule { background: #3d3931; }
 
 /* 用户消息气泡(深色):accent-strong 底保对比度 */
 .dark .message.user .message-bubble { background: rgb(var(--accent-strong)); border-color: rgb(var(--accent-strong)); }

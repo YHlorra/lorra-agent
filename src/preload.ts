@@ -57,6 +57,7 @@ import {
 import {
   type CollectResult,
   SKILLS_IPC,
+  type SkillCreatedResult,
   type SkillGitStatus,
   type SkillReadResult,
   type SkillXray,
@@ -244,6 +245,9 @@ const lorra = {
       invoke<void>(SKILLS_IPC.setWsEnabled, { name, enabled, wsPath }),
     // /skill 触发(2026-08-14):读取技能文件原文,composer 拼 prompt 后走正常发送。
     read: (name: string) => invoke<SkillReadResult>(SKILLS_IPC.read, { name }),
+    // 手动新建(2026-08-18):写 <ws>/.lorra/skills/<name>.md。
+    create: (args: { name: string; content: string; wsPath?: string }) =>
+      invoke<SkillCreatedResult>(SKILLS_IPC.create, args),
   },
   clipboard: {
     // 输入栏粘贴图片(2026-08-14):主进程读系统剪贴板 → 存工作区 → 返回预览 dataUrl。

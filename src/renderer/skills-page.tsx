@@ -1,4 +1,4 @@
-import { ArrowLeft } from 'lucide-react';
+import { ArrowLeft, Plus } from 'lucide-react';
 import type { JSX } from 'react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Badge } from '@/components/ui/badge';
@@ -14,6 +14,7 @@ import {
 } from '@/components/ui/table';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { useAppStore } from '@/lib/app-store';
+import { useT } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 import type { ExperienceAuditDto, OkfCheckResultDto } from '../shared/memory-api';
 import type { LorraError } from '../shared/result';
@@ -77,6 +78,7 @@ const SOURCE_SUB_LABELS: Record<SkillSource, string> = {
   workspace: '工作区',
   'lorra-global': 'lorra 库',
   user: '用户',
+  claude: 'Claude 库',
   ancestor: '祖先',
   'agent-plugin': '插件',
 };
@@ -112,11 +114,16 @@ function fmtLastUsed(ts: number | null): string {
 
 export function SkillsPage({ onBack, onOpenFile, embedded }: SkillsPageProps): JSX.Element {
   const setPage = useAppStore((s) => s.setPage);
+  const t = useT();
   const [phase, setPhase] = useState<'loading' | 'ready' | 'error'>('loading');
   const [error, setError] = useState<LorraError | null>(null);
   const [xray, setXray] = useState<SkillXray | null>(null);
   /** 行内动作错误(开关/收集/安装/更新失败),只影响本页。 */
   const [actionError, setActionError] = useState<LorraError | null>(null);
+  /** 手动新建技能弹层开关(2026-08-18)。 */
+  const [creating, setCreating] = useState(false);
+  /** 新建成功提示(技能名,已创建后展示;下次操作前保留)。 */
+  const [createdName, setCreatedName] = useState<string | null>(null);
   const [cleaning, setCleaning] = useState(false);
   /** 正在写入开关的技能名(防重复提交;行内开关 + 弹层全局隐藏共用)。 */
   const [toggling, setToggling] = useState<ReadonlySet<string>>(new Set());
@@ -476,15 +483,24 @@ export function SkillsPage({ onBack, onOpenFile, embedded }: SkillsPageProps): J
             <button
               type="button"
               className="btn btn-ghost"
+              data-testid="skills-new"
+              onClick={() => setCreating(true)}
+            >
+              <Plus size={13} aria-hidden="true" />
+              {t('skillsPage.newSkill')}
+            </button>
+            <span className="skills-sub" data-testid="skills-install-hint">
+              安装新技能：在对话里把技能仓库链接发给智能体
+            </span>
+            <button
+              type="button"
+              className="btn btn-ghost"
               data-testid="skills-collect"
               disabled={collecting}
               onClick={() => void handleCollect()}
             >
               收集散乱技能
             </button>
-            <span className="skills-sub" data-testid="skills-install-hint">
-              安装新技能：在对话里把技能仓库链接发给智能体
-            </span>
             <button
               type="button"
               className="btn btn-ghost"
@@ -525,6 +541,14 @@ export function SkillsPage({ onBack, onOpenFile, embedded }: SkillsPageProps): J
           {actionError && (
             <div className="skills-action-error" data-testid="skills-action-error" role="alert">
               {actionError.message}
+            </div>
+          )}
+
+          {createdName && (
+            <div className="skills-result-banner" data-testid="skills-create-result" role="status">
+              <div className="sk-result-main">
+                {t('skillsPage.newSkillCreated', { name: createdName })}
+              </div>
             </div>
           )}
 
@@ -867,6 +891,18 @@ export function SkillsPage({ onBack, onOpenFile, embedded }: SkillsPageProps): J
         </div>
       </TooltipProvider>
 
+      {/* 手动新建技能弹层(2026-08-18):成功 → 关弹层 + 重取 xray(新行入列)。 */}
+      {creating && (
+        <CreateSkillDialog
+          onClose={() => setCreating(false)}
+          onDone={(name) => {
+            setCreating(false);
+            setCreatedName(name);
+            void refresh();
+          }}
+        />
+      )}
+
       {/* 详情弹层:点行打开(开关/操作单元格 stopPropagation);X/遮罩关闭。 */}
       {selected && (
         <Dialog open onOpenChange={(open) => setSelected(open ? selected : null)}>
@@ -1014,6 +1050,75 @@ export function SkillsPage({ onBack, onOpenFile, embedded }: SkillsPageProps): J
         </Dialog>
       )}
     </main>
+  );
+}
+
+/** 手动新建技能弹层(2026-08-18):name(kebab-case)+ content;任一为空禁用「创建」;
+ * 失败显示 .skills-action-error;成功回调 onDone(name) 由页面关弹层 + refresh。 */
+function CreateSkillDialog({
+  onClose,
+  onDone,
+}: {
+  onClose: () => void;
+  onDone: (name: string) => void;
+}): JSX.Element {
+  const t = useT();
+  const [name, setName] = useState('');
+  const [content, setContent] = useState('');
+  const [err, setErr] = useState<LorraError | null>(null);
+  const doCreate = async (): Promise<void> => {
+    const trimmed = name.trim();
+    const res = await window.lorra.skills.create({ name: trimmed, content });
+    if (res.ok) onDone(res.value.name);
+    else setErr(res.error);
+  };
+  return (
+    <Dialog
+      open
+      onOpenChange={(o) => {
+        if (!o) onClose();
+      }}
+    >
+      <DialogContent className="skills-detail" data-testid="skills-create-dialog">
+        <div className="sk-detail-head">
+          <h2 className="sk-detail-name">{t('skillsPage.newSkillTitle')}</h2>
+        </div>
+        <input
+          className="pc-input"
+          data-testid="skills-create-name"
+          placeholder={t('skillsPage.newSkillNamePlaceholder')}
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+        />
+        <textarea
+          className="pc-input"
+          data-testid="skills-create-content"
+          placeholder={t('skillsPage.newSkillContentPlaceholder')}
+          rows={8}
+          value={content}
+          onChange={(e) => setContent(e.target.value)}
+        />
+        {err && (
+          <div className="skills-action-error" data-testid="skills-create-error" role="alert">
+            {err.message}
+          </div>
+        )}
+        <div className="sk-detail-actions">
+          <button type="button" className="btn btn-ghost" onClick={onClose}>
+            {t('skillsPage.newSkillCancel')}
+          </button>
+          <button
+            type="button"
+            className="btn btn-primary"
+            data-testid="skills-create-confirm"
+            disabled={name.trim() === '' || content.trim() === ''}
+            onClick={() => void doCreate()}
+          >
+            {t('skillsPage.newSkillCreate')}
+          </button>
+        </div>
+      </DialogContent>
+    </Dialog>
   );
 }
 

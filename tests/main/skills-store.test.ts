@@ -4,6 +4,7 @@ import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   getSkillSourcePaths,
+  SEED_FILE_SKILL_NAMES,
   type SkillScan,
   SYSTEM_MANAGED_SKILL_NAMES,
   scanSkills,
@@ -57,7 +58,7 @@ function requireSkill(scan: SkillScan, name: string): SkillInfo {
 
 const issueCodes = (s: SkillInfo): string[] => s.issues.map((i) => i.code);
 
-describe('getSkillSourcePaths（四源顺序）', () => {
+describe('getSkillSourcePaths（六源顺序）', () => {
   let home: string;
   let cleanup: string[];
 
@@ -74,7 +75,7 @@ describe('getSkillSourcePaths（四源顺序）', () => {
     rmSync(home, { recursive: true, force: true, maxRetries: 10, retryDelay: 250 });
   });
 
-  it('工作区为 git 根：四源 = [ws/.agents/skills, ~/.lorra/skills, ~/.agents/skills, ws/.lorra/skills]', () => {
+  it('工作区为 git 根：六源 = [ws/.agents/skills, ~/.lorra/skills, ~/.agents/skills, ~/.claude/skills, ws/.lorra/skills]', () => {
     const ws = path.join(home, 'work');
     mkdirSync(path.join(ws, '.git'), { recursive: true });
 
@@ -82,6 +83,7 @@ describe('getSkillSourcePaths（四源顺序）', () => {
       path.join(ws, '.agents', 'skills'),
       path.join(home, '.lorra', 'skills'),
       path.join(home, '.agents', 'skills'),
+      path.join(home, '.claude', 'skills'),
       path.join(ws, '.lorra', 'skills'),
     ]);
   });
@@ -98,6 +100,7 @@ describe('getSkillSourcePaths（四源顺序）', () => {
       path.join(gitRoot, '.agents', 'skills'),
       path.join(home, '.lorra', 'skills'),
       path.join(home, '.agents', 'skills'),
+      path.join(home, '.claude', 'skills'),
       path.join(ws, '.lorra', 'skills'),
     ]);
   });
@@ -133,6 +136,7 @@ describe('getSkillSourcePaths（四源顺序）', () => {
       path.join(ws, '.agents', 'skills'),
       path.join(home, '.lorra', 'skills'),
       path.join(home, '.agents', 'skills'),
+      path.join(home, '.claude', 'skills'),
       path.join(ws, '.lorra', 'skills'),
     ]);
 
@@ -161,6 +165,27 @@ describe('getSkillSourcePaths（四源顺序）', () => {
     expect(byName.get('inside')?.source).toBe('collection');
     // `<root>abc`(user2)不匹配 `<root>`(user):前缀边界带分隔符,不误判为 collection。
     expect(byName.get('near')?.source).toBe('ancestor');
+  });
+
+  it('claude 源(2026-08-18): ~/.claude/skills 技能 → source=claude && scope=global', async () => {
+    const ws = path.join(home, 'work');
+    mkdirSync(path.join(ws, '.git'), { recursive: true });
+    writeSkill(path.join(home, '.claude', 'skills', 'claude-test', 'SKILL.md'), {
+      name: 'claude-test',
+      description: '来自 Claude Code 的技能',
+    });
+
+    const scan = unwrapScan(await scanSkills(ws, { homedir: home }));
+    const skill = requireSkill(scan, 'claude-test');
+    expect(skill.source).toBe('claude');
+    expect(skill.scope).toBe('global');
+    // claude 源排在 lorra 全局 / user 之后、工作区之前(去重优先级)。
+    const paths = getSkillSourcePaths(ws, { homedir: home });
+    const claudeDir = path.join(home, '.claude', 'skills');
+    expect(paths.indexOf(claudeDir)).toBeGreaterThan(
+      paths.indexOf(path.join(home, '.agents', 'skills')),
+    );
+    expect(paths.indexOf(claudeDir)).toBeLessThan(paths.indexOf(path.join(ws, '.lorra', 'skills')));
   });
 });
 
@@ -455,9 +480,9 @@ describe('scanSkills：预算', () => {
       description: 'b'.repeat(100),
       'disable-model-invocation': true,
     });
-    // 系统剔除种子（复盘种子，灰标「内部·未注入」）：
+    // 系统剔除种子（per-workspace 播种链路专属,灰标「内部·未注入」）：
     writeSkill(path.join(home, '.agents', 'skills', 'c', 'SKILL.md'), {
-      name: 'daily-review',
+      name: 'memory-maintenance',
       description: 'c'.repeat(200),
     });
     // 用户禁用名单：
@@ -489,18 +514,20 @@ describe('scanSkills：预算', () => {
     // 逐技能标记：
     expect(requireSkill(scan, 'a-skill').enabled).toBe(true);
     expect(requireSkill(scan, 'b-skill').disableModelInvocation).toBe(true);
-    expect(requireSkill(scan, 'daily-review').systemManaged).toBe(true);
-    expect(requireSkill(scan, 'daily-review').enabled).toBe(false);
+    expect(requireSkill(scan, 'memory-maintenance').systemManaged).toBe(true);
+    expect(requireSkill(scan, 'memory-maintenance').enabled).toBe(false);
     expect(requireSkill(scan, 'd-skill').enabled).toBe(false);
     expect(requireSkill(scan, 'd-skill').issues).toEqual([]);
   });
 
-  it('系统剔除种子名单 = memory-maintenance / daily-review / deep-review / ofk-digest', async () => {
-    expect(SYSTEM_MANAGED_SKILL_NAMES).toEqual([
+  it('系统管理种子 = memory-maintenance / ofk-digest; daily/deep-review 已是普通技能', async () => {
+    expect(SYSTEM_MANAGED_SKILL_NAMES).toEqual(['memory-maintenance', 'ofk-digest']);
+    // 种子文件集合 = SYSTEM_MANAGED ∪ 复盘种子(收集器按它跳过,UI 灰标只认前者)。
+    expect(SEED_FILE_SKILL_NAMES).toEqual([
       'memory-maintenance',
+      'ofk-digest',
       'daily-review',
       'deep-review',
-      'ofk-digest',
     ]);
 
     for (const name of SYSTEM_MANAGED_SKILL_NAMES) {
@@ -509,12 +536,25 @@ describe('scanSkills：预算', () => {
         description: `${name} 描述`,
       });
     }
+    // 复盘种子(2026-08-18 迁全局路径后)以普通技能身份出现:无灰标、可启用。
+    for (const name of ['daily-review', 'deep-review']) {
+      writeSkill(path.join(home, '.agents', 'skills', name, 'SKILL.md'), {
+        name,
+        description: `${name} 描述`,
+      });
+    }
     const scan = unwrapScan(await scanSkills(ws, { homedir: home }));
     for (const name of SYSTEM_MANAGED_SKILL_NAMES) {
       expect(requireSkill(scan, name).systemManaged).toBe(true);
+      expect(requireSkill(scan, name).enabled).toBe(false);
     }
-    expect(scan.budget.enabledCount).toBe(0);
-    expect(scan.budget.charSum).toBe(0);
+    for (const name of ['daily-review', 'deep-review']) {
+      expect(requireSkill(scan, name).systemManaged).toBe(false);
+      expect(requireSkill(scan, name).enabled).toBe(true);
+    }
+    // 系统种子不进预算;复盘种子计入(普通技能语义)。
+    expect(scan.budget.enabledCount).toBe(2);
+    expect(scan.budget.charSum).toBeGreaterThan(0);
   });
 
   it('三级状态边界：≤2000 good / ≤4000 warn / >4000 over', async () => {

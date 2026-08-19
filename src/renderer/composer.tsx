@@ -1,3 +1,4 @@
+import { ChevronDown } from 'lucide-react';
 import type { ClipboardEvent, DragEvent, FormEvent, JSX, KeyboardEvent } from 'react';
 import { useEffect, useRef, useState } from 'react';
 import type { SlashCommandName } from '@/lib/slash-commands';
@@ -6,6 +7,7 @@ import type { SessionStatus } from '../shared/agent-events';
 import type { LorraError } from '../shared/result';
 import type { ReviewKind } from '../shared/review-api';
 import { useT } from './lib/i18n';
+import { ModelCapsule } from './model-capsule';
 
 export type ComposerReference =
   | { id: string; fileName: string; text: string; kind?: 'selection' }
@@ -34,8 +36,10 @@ export interface ComposerProps {
   modelUnavailableBanner?: boolean;
   /** Current default model display name; shown in the composer presence row. */
   defaultModelName?: string | null;
-  /** Empty state shown when no events yet for the active session. */
-  emptyStateMessage?: string;
+  /** 当前默认模型 id(胶囊仓高亮);null = 无默认。 */
+  defaultCurrent?: { providerId: string; modelId: string } | null;
+  /** 切换模型(App 层 setDefault + refresh),胶囊仓选中后回调。 */
+  onModelChanged?: (providerId: string, modelId: string) => Promise<void>;
   /** 引用胶囊(「问 AI」选区文本 / @ 文件):发送时拼进消息体,发送后清空。 */
   references?: ComposerReference[];
   onClearReferences?: () => void;
@@ -68,7 +72,8 @@ export function Composer({
   modelAvailable = true,
   modelUnavailableBanner,
   defaultModelName,
-  emptyStateMessage,
+  defaultCurrent,
+  onModelChanged,
   references,
   onClearReferences,
   onFileCandidates,
@@ -117,6 +122,8 @@ export function Composer({
   // 队列原地编辑态:editingId 非空时该项渲染 input(draft),Enter 保存 / Esc 取消。
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editDraft, setEditDraft] = useState('');
+  // 内联模型切换胶囊仓(2026-08-19):模型名按钮触发展开,选模型后关闭。
+  const [modelCapsuleOpen, setModelCapsuleOpen] = useState(false);
   const queueEditRef = useRef<HTMLInputElement | null>(null);
   // autoFocus 禁用(无障碍,markdown-editable 同款);编辑态挂载后手动聚焦。
   useEffect(() => {
@@ -207,6 +214,30 @@ export function Composer({
       cancelled = true;
     };
   }, [skillPrefix, skillMenuOpen]);
+
+  /** 弹出菜单键盘导航(2026-08-19 修复):skill/斜杠/文件三个同构 .slash-menu 高亮
+   * 项滚进可视区——按↓/↑ 时视角跟随光标。jsdom 无 scrollIntoView,`?.` 兜底。 */
+  useEffect(() => {
+    const activeId =
+      skillMenuOpen && skillCandidates.length > 0
+        ? `skill-opt-${skillCandidates[activeSkillIndex]?.name}`
+        : fileMenuOpen && fileCandidates.length > 0
+          ? `file-ref-opt-${fileCandidates[activeFileIndex]?.fileId}`
+          : menuOpen && candidates.length > 0
+            ? `slash-opt-${candidates[activeIndex]?.name}`
+            : '';
+    document.getElementById(activeId)?.scrollIntoView?.({ block: 'nearest' });
+  }, [
+    skillMenuOpen,
+    skillCandidates,
+    activeSkillIndex,
+    fileMenuOpen,
+    fileCandidates,
+    activeFileIndex,
+    menuOpen,
+    candidates,
+    activeIndex,
+  ]);
 
   /** @ 选中文件:删输入末尾 @前缀,追加文件引用胶囊。 */
   function selectFileRef(candidate: { fileId: string; name: string }): void {
@@ -461,6 +492,12 @@ export function Composer({
   }
 
   function handleKeyDown(event: KeyboardEvent<HTMLTextAreaElement>): void {
+    // 模型胶囊仓开启时 Esc 关闭(搜索框聚焦在胶囊内,此处兜底文本区场景)。
+    if (modelCapsuleOpen && event.key === 'Escape') {
+      event.preventDefault();
+      setModelCapsuleOpen(false);
+      return;
+    }
     // /skill 候选菜单:↑/↓ 选择,Enter 直接触发,Tab 补全命令文本,Esc 关闭。
     if (skillMenuOpen && skillCandidates.length > 0) {
       if (event.key === 'ArrowDown') {
@@ -559,14 +596,6 @@ export function Composer({
 
   return (
     <div className="composer-region">
-      {emptyStateMessage ? (
-        <div className="composer-empty-state" role="status">
-          <span className="composer-empty-rule" aria-hidden="true" />
-          <p>{emptyStateMessage}</p>
-          <span className="composer-empty-rule" aria-hidden="true" />
-        </div>
-      ) : null}
-
       {commandHint ? (
         <div className="composer-banner composer-banner-warning" role="status">
           <strong>{t('composer.slashCommand')}</strong>
@@ -768,6 +797,8 @@ export function Composer({
             setFileIndex(0);
             setSkillMenuDismissed(false);
             setSkillIndex(0);
+            // 临时提示(命令用法等)一编辑即消退,避免悬浮残留(2026-08-19)。
+            if (commandHint) setCommandHint(null);
           }}
           onKeyDown={handleKeyDown}
           onPaste={handlePaste}
@@ -857,6 +888,29 @@ export function Composer({
         )}
         <div className="composer-actions">
           <div className="composer-presence" aria-live="polite">
+            {/* 2026-08-19:模型胶囊常驻,不再被 busy 状态替换——agent 工作中也可
+ 预选下一条消息的模型;思考环/状态点/快捷键提示排在胶囊右侧。 */}
+            {defaultModelName && (
+              <span className="model-capsule-anchor">
+                <button
+                  type="button"
+                  className="composer-model-button"
+                  onClick={() => setModelCapsuleOpen((o) => !o)}
+                  aria-expanded={modelCapsuleOpen}
+                  aria-label={t('composer.openModel')}
+                >
+                  {defaultModelName}
+                  <ChevronDown className="composer-model-chevron" aria-hidden="true" />
+                </button>
+                {modelCapsuleOpen && (
+                  <ModelCapsule
+                    current={defaultCurrent ?? null}
+                    onModelChanged={onModelChanged ?? (async () => {})}
+                    onClose={() => setModelCapsuleOpen(false)}
+                  />
+                )}
+              </span>
+            )}
             {status === 'streaming' ? (
               <>
                 <span className="composer-status-dot is-streaming" aria-hidden="true" />
@@ -868,12 +922,7 @@ export function Composer({
                 <span>{t('composer.usingTools')}</span>
               </>
             ) : (
-              <>
-                {defaultModelName && (
-                  <span className="composer-model-name">{defaultModelName}</span>
-                )}
-                <span className="composer-shortcut">{t('composer.sendHint')}</span>
-              </>
+              <span className="composer-shortcut">{t('composer.sendHint')}</span>
             )}
           </div>
 

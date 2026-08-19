@@ -13,6 +13,11 @@ export interface SessionRecord {
    */
   unsubscribe?: () => void;
   lastSeq: number;
+  /**
+   * 空闲看门狗基准(2026-08-19):最近一次活动事件时间戳。busy 会话
+   * (streaming/tool-running)零事件超过 STUCK_TIMEOUT_MS 判卡住。
+   */
+  lastActivityAt: number;
 }
 
 export class SessionRegistry {
@@ -24,6 +29,7 @@ export class SessionRegistry {
       piSessionHandle: handle,
       status: 'idle',
       lastSeq: 0,
+      lastActivityAt: Date.now(),
     };
     this.records.set(sessionId, record);
     return record;

@@ -11,7 +11,7 @@ import type { Result } from '../../shared/result';
 import { toLorraError } from '../../shared/result';
 import type { CollectResult } from '../../shared/skills-api';
 import { readSettings } from '../workspace/settings';
-import { parseFrontmatter, SYSTEM_MANAGED_SKILL_NAMES } from './skills-store';
+import { parseFrontmatter, SEED_FILE_SKILL_NAMES } from './skills-store';
 
 /**
  * 技能收集（2026-08-13 批，D5）——纯文件操作层，无 IPC/页面依赖。
@@ -183,7 +183,7 @@ async function collectFromLocation(
   } catch {
     return; // 不可读位置：跳过（best-effort）。
   }
-  const seeds = SYSTEM_MANAGED_SKILL_NAMES as readonly string[];
+  const seeds = SEED_FILE_SKILL_NAMES as readonly string[];
   for (const entry of entries) {
     const full = path.join(location, entry.name);
     // 已收集判定:realpath(跟随链接) ⊆ 收集根(前缀边界;win32 大小写不敏感)。

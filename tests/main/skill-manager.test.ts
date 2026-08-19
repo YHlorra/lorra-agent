@@ -25,7 +25,7 @@ import {
   setWorkspaceEnabled,
   unlinkDangling,
 } from '../../src/main/skills/skill-manager';
-import { SYSTEM_MANAGED_SKILL_NAMES, scanSkills } from '../../src/main/skills/skills-store';
+import { scanSkills } from '../../src/main/skills/skills-store';
 import { readSettings, writeSettings } from '../../src/main/workspace/settings';
 import type { Result } from '../../src/shared/result';
 import { SKILL_TOKEN_ESTIMATE_DIVISOR } from '../../src/shared/skills-api';
@@ -235,8 +235,8 @@ describe('setSkillEnabled（全局启停 / 软禁用名单持久化）', () => {
     expect((await readSettings()).disabledSkills ?? []).toEqual([]);
   });
 
-  it('系统管理种子逐个拒绝（memory-maintenance / daily-review / deep-review）', async () => {
-    for (const name of SYSTEM_MANAGED_SKILL_NAMES) {
+  it('系统管理种子逐个拒绝（memory-maintenance / ofk-digest；复盘种子已放行）', async () => {
+    for (const name of ['memory-maintenance', 'ofk-digest']) {
       const res = await setSkillEnabled(name, false);
       expect(res.isErr()).toBe(true);
       if (res.isErr()) {
@@ -244,7 +244,11 @@ describe('setSkillEnabled（全局启停 / 软禁用名单持久化）', () => {
         expect(res.error.message).toContain('系统管理');
       }
     }
-    expect((await readSettings()).disabledSkills ?? []).toEqual([]);
+    // 2026-08-18:复盘种子迁全局路径后不再是系统管理——可正常启停(需在发现集合内)。
+    writeWorkspaceSkill(ws, 'daily-review', 'daily-review 描述');
+    const daily = await setSkillEnabled('daily-review', false, { wsPath: ws });
+    expect(daily.isErr()).toBe(false);
+    expect((await readSettings()).disabledSkills ?? []).toEqual(['daily-review']);
   });
 
   it('幂等：重复 disable 不重复入列', async () => {
@@ -649,8 +653,8 @@ describe('setWorkspaceEnabled(按工作区停用名单)', () => {
     expect((await readSettings()).workspaceSkillOverrides?.[wsReal] ?? []).toEqual([]);
   });
 
-  it('系统管理种子逐个拒绝(system-managed-skill),名单不变', async () => {
-    for (const name of SYSTEM_MANAGED_SKILL_NAMES) {
+  it('系统管理种子逐个拒绝(system-managed-skill),名单不变;复盘种子放行', async () => {
+    for (const name of ['memory-maintenance', 'ofk-digest']) {
       const res = await setWorkspaceEnabled(name, false, ws);
       expect(res.isErr()).toBe(true);
       if (res.isErr()) {
@@ -658,7 +662,14 @@ describe('setWorkspaceEnabled(按工作区停用名单)', () => {
         expect(res.error.message).toContain('系统管理');
       }
     }
-    expect((await readSettings()).workspaceSkillOverrides ?? {}).toEqual({});
+    // 2026-08-18:daily-review 已是普通技能,可经按工作区开关停用(需在发现集合内)。
+    writeWorkspaceSkill(ws, 'daily-review', 'daily-review 描述');
+    const daily = await setWorkspaceEnabled('daily-review', false, ws);
+    expect(daily.isErr()).toBe(false);
+    expect((await readSettings()).workspaceSkillOverrides?.[wsReal] ?? []).toEqual([
+      'daily-review',
+    ]);
+    expect((await readSettings()).workspaceSkillOverrides ?? {}).not.toEqual({});
   });
 
   it('非法 name(空串)→ invalid-skill-name;非法 wsPath → invalid-workspace-path', async () => {

@@ -69,6 +69,9 @@ function makeSession(id: string, cwd: string, p: string = `/tmp/${id}.jsonl`): S
 describe('session isolation', () => {
   it('binds each new session to the default in same-source SDK settings', async () => {
     vi.stubEnv('LORRA_E2E_USERDATA', 'C:/test/user-data');
+    // 2026-08-18:homdir 指向受控路径 → ~/.claude/skills 不存在,三路径门控确定性
+    // 排除(claude 存在性分支由 tests/main/skills-paths.test.ts 显式覆盖)。
+    vi.spyOn(os, 'homedir').mockReturnValue('C:/test/home');
     const agentDir = path.join('C:/test/user-data', '.lorra');
     let defaultModel = 'first-model';
     const sessions: Array<{ defaultModel: string }> = [];
@@ -123,6 +126,7 @@ describe('session isolation', () => {
       'second-model',
     ]);
     vi.unstubAllEnvs();
+    vi.restoreAllMocks();
   });
 
   it('skillsOverride filters out project `.pi/skills` (SDK default), keeps `.lorra/skills`', async () => {

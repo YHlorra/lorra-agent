@@ -27,6 +27,7 @@ describe('skills-api 通道常量', () => {
       updateAll: 'lorra.skills.updateAll',
       setWsEnabled: 'lorra.skills.setWsEnabled',
       read: 'lorra.skills.read',
+      create: 'lorra.skills.create',
     });
     // 只读契约对象（防止意外被改）。
     expect(Object.isFrozen(SKILLS_IPC)).toBe(true);

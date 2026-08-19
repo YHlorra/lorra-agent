@@ -672,6 +672,37 @@ describe('Composer 斜杠补全菜单', () => {
     expect(onSend).not.toHaveBeenCalled();
     expect(await screen.findByText(/未识别的命令：\/f/)).toBeInTheDocument();
   });
+
+  it('Given /c + ArrowDown When 键盘导航 Then 高亮项滚进可视区(scrollIntoView)', async () => {
+    const scrollSpy = vi.spyOn(Element.prototype, 'scrollIntoView').mockImplementation(() => {});
+    try {
+      const { user, ta } = await setup();
+      await user.type(ta, '/c');
+      await screen.findByRole('listbox', { name: '斜杠命令' });
+      scrollSpy.mockClear();
+
+      await user.keyboard('{ArrowDown}');
+
+      // 高亮从 compact → copy,scrollIntoView 以 nearest 跟随光标。
+      expect(scrollSpy).toHaveBeenCalled();
+      expect(scrollSpy.mock.calls.at(-1)?.[0]).toEqual({ block: 'nearest' });
+      expect(scrollSpy.mock.instances.at(-1)).toBe(
+        screen.getByRole('option', { name: /copy/ }),
+      );
+    } finally {
+      scrollSpy.mockRestore();
+    }
+  });
+
+  it('Given /skill + Enter 显示用法提示 When 继续输入 Then 用法提示消退', async () => {
+    const { user, ta } = await setup();
+    await user.type(ta, '/skill');
+    await user.keyboard('{Enter}');
+
+    await screen.findByText(/用法：\/skill/);
+    await user.type(ta, 'x');
+    await waitFor(() => expect(screen.queryByText(/用法：\/skill/)).not.toBeInTheDocument());
+  });
 });
 
 // @ 文件引用:输入 @ 弹工作区文件候选,Enter 成胶囊,发送时内容快照进消息体。

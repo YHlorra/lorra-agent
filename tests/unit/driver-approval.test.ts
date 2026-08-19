@@ -2,7 +2,11 @@ import { mkdtempSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { LorraDriver, type SessionPersistence } from '../../src/main/pi-sdk-driver/driver';
+import {
+  APPROVAL_TIMEOUT_MS,
+  LorraDriver,
+  type SessionPersistence,
+} from '../../src/main/pi-sdk-driver/driver';
 import type { EventRouter } from '../../src/main/pi-sdk-driver/event-router';
 
 // driver.ts 静态依赖 memory/recall → shared-memory-store(node:sqlite TLA),
@@ -217,5 +221,107 @@ describe('LorraDriver 分级审批', () => {
 
     await expect(a).resolves.toBe('deny');
     expect(approvalsMap().has(idA)).toBe(false);
+  });
+});
+
+describe('审批 deadline 超时自动 deny(2026-08-19,)', () => {
+  let ws: string;
+  let driver: LorraDriver;
+
+  beforeEach(async () => {
+    vi.useFakeTimers();
+    ws = mkdtempSync(path.join(os.tmpdir(), 'lorra-approval-deadline-'));
+    vi.stubEnv('LORRA_E2E_USERDATA', ws);
+    driver = new LorraDriver({ workspacePath: ws, persistence: noopPersistence });
+    await driver.continueRecent();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.unstubAllEnvs();
+  });
+
+  function markBusy(): void {
+    const registry = (
+      driver as unknown as {
+        registry: { updateStatus(sessionId: string, status: string): void };
+      }
+    ).registry;
+    registry.updateStatus('s', 'streaming');
+  }
+
+  function approvalCount(): number {
+    const approvals = (driver as unknown as { approvals: Map<string, Record<string, unknown>> })
+      .approvals;
+    return approvals.size;
+  }
+
+  function collectEvents(): Array<{ type: string; approvalId?: string; decision?: string }> {
+    const emitted: Array<{ type: string; approvalId?: string; decision?: string }> = [];
+    const router = (driver as unknown as { router: EventRouter }).router;
+    const wcStub = {
+      isDestroyed: () => false,
+      send: (_channel: string, event: unknown) => {
+        emitted.push(event as { type: string; approvalId?: string; decision?: string });
+      },
+    } as never;
+    router.subscribe('s', wcStub);
+    return emitted;
+  }
+
+  it('到期自动 deny + 发 approval.resolved(deny) + 移除条目', async () => {
+    markBusy();
+    const emitted = collectEvents();
+    const decision = driver.requestApproval({
+      toolName: 'write',
+      target: 'D:/deadline.txt',
+      reason: 'approval-required: 测试审批超时',
+    });
+    const approvalId = emitted[0]?.approvalId as string;
+    expect(approvalCount()).toBe(1);
+
+    await vi.advanceTimersByTimeAsync(APPROVAL_TIMEOUT_MS);
+
+    await expect(decision).resolves.toBe('deny');
+    expect(emitted).toContainEqual(
+      expect.objectContaining({ type: 'approval.resolved', approvalId, decision: 'deny' }),
+    );
+    expect(approvalCount()).toBe(0); // 超时后条目移除,哨兵不泄漏
+  });
+
+  it('超时后再 respondApproval → approval not found(条目已移除)', async () => {
+    markBusy();
+    const emitted = collectEvents();
+    const decision = driver.requestApproval({
+      toolName: 'write',
+      target: 'D:/deadline2.txt',
+      reason: 'approval-required: 测试审批超时',
+    });
+    const approvalId = emitted[0]?.approvalId as string;
+
+    await vi.advanceTimersByTimeAsync(APPROVAL_TIMEOUT_MS);
+    await expect(decision).resolves.toBe('deny');
+    await expect(driver.respondApproval('s', approvalId, 'allowAlways')).rejects.toThrow(
+      'approval not found',
+    );
+  });
+
+  it('用户先裁决后哨兵清除:推进远超超时不重复 resolve', async () => {
+    markBusy();
+    const emitted = collectEvents();
+    const decision = driver.requestApproval({
+      toolName: 'write',
+      target: 'D:/deadline3.txt',
+      reason: 'approval-required: 测试审批超时',
+    });
+    const approvalId = emitted[0]?.approvalId as string;
+
+    await driver.respondApproval('s', approvalId, 'allowAlways');
+    await expect(decision).resolves.toBe('allowAlways');
+
+    await vi.advanceTimersByTimeAsync(APPROVAL_TIMEOUT_MS * 2);
+    const resolvedEvents = emitted.filter((e) => e.type === 'approval.resolved');
+    expect(resolvedEvents).toHaveLength(1); // 只有用户那次,超时哨兵已清除不补刀
+    expect(approvalCount()).toBe(1); // 用户裁决不移除条目(幂等校验用)
   });
 });

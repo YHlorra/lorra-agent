@@ -192,6 +192,8 @@ export function useModels(providerId: string | undefined): ModelsState {
 export interface ChatModelState {
   modelAvailable: boolean;
   defaultModelName: string | null;
+  /** 当前默认模型 {providerId, modelId},供胶囊仓高亮;无默认模型时为 null。 */
+  current: { providerId: string; modelId: string } | null;
   loading: boolean;
   refresh: () => Promise<void>;
 }
@@ -203,6 +205,7 @@ export interface ChatModelState {
 export function useChatModelState(): ChatModelState {
   const [modelAvailable, setModelAvailable] = useState(false);
   const [defaultModelName, setDefaultModelName] = useState<string | null>(null);
+  const [current, setCurrent] = useState<{ providerId: string; modelId: string } | null>(null);
   const [loading, setLoading] = useState(true);
 
   const refresh = useCallback(async () => {
@@ -214,6 +217,7 @@ export function useChatModelState(): ChatModelState {
       ]);
       const availableModels = avail.ok ? avail.value : [];
       setModelAvailable(availableModels.length > 0);
+      setCurrent(def.ok ? def.value : null);
       if (def.ok && def.value) {
         const match = availableModels.find((m) => m.id === def.value?.modelId);
         setDefaultModelName(match?.name ?? def.value.modelId);
@@ -223,6 +227,7 @@ export function useChatModelState(): ChatModelState {
     } catch {
       setModelAvailable(false);
       setDefaultModelName(null);
+      setCurrent(null);
     } finally {
       setLoading(false);
     }
@@ -232,7 +237,7 @@ export function useChatModelState(): ChatModelState {
     void refresh();
   }, [refresh]);
 
-  return { modelAvailable, defaultModelName, loading, refresh };
+  return { modelAvailable, defaultModelName, current, loading, refresh };
 }
 
 /** Loads the default model + all available models for the default-model selector. */

@@ -13,21 +13,25 @@ import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { generateReview, type ModelInvoke } from '../../src/main/memory/review-generator';
 import { type ReviewMeta, ReviewStore } from '../../src/main/memory/review-store';
+import { lorraConfigDir } from '../../src/main/pi-sdk-driver/lorra-config-dir';
+import { getBuiltinSkillSeed } from '../../src/main/skills/builtin-skill-seeder';
 import { MEMORY_CONTENT_MAX_BYTES, type MemoryEntry } from '../../src/shared/memory-schema';
 import type { Result } from '../../src/shared/result';
 import { err, ok } from '../../src/shared/result';
 import type { ReviewRequest } from '../../src/shared/review-api';
 import { freshUserData, seedConcept, seedDigest } from './ofk-test-fixtures';
 
-// Requirement: 复盘技能文件（工作区级个性化）+ 每日/每周复盘生成（无硬编码模块勾选）。
+// Requirement: 复盘技能文件（2026-08-18 起全局路径 ~/.lorra/skills）+ 每日/每周复盘生成
+// （无硬编码模块勾选）。
 // 契约:
 // - ReviewRequest 无 modules 无 userPrompt: { kind, dateISO? }（PM 2026-08-08 取消
 // 提示词引导——复盘重点由技能文件承载,用户直接改文件）
-// - 技能文件 <workspace>/.lorra/skills/{daily,deep}-review.md:首次生成缺失时
-// 从内置种子【字节级原样复制】播种,不改写;生成器以磁盘当前内容为方法论提示
+// - 技能文件 <lorraConfigDir>/skills/{daily,deep}-review.md:生成器只「读 + fallback」——
+// 缺失时用内置种子(getBuiltinSkillSeed)兜底,**不写盘**(写盘由启动期 seedBuiltinSkills
+// 负责,write-if-missing);磁盘当前内容为方法论提示,不覆盖。
 // - generateReview(req, deps{ facts, invoke, store, workspacePath })
 
-const SEEDS = fileURLToPath(new URL('../../src/main/memory/review-skill-seeds', import.meta.url));
+const SEEDS = fileURLToPath(new URL('../../src/main/skills/builtin-skill-seeds', import.meta.url));
 const DAILY_SEED = path.join(SEEDS, 'daily-review.md');
 const DEEP_SEED = path.join(SEEDS, 'deep-review.md');
 
@@ -40,9 +44,22 @@ function skillPath(workspace: string, kind: 'daily' | 'weekly'): string {
   );
 }
 
-/** 模拟用户已放置/修改技能文件（父目录可能尚不存在）。 */
-function writeSkill(workspace: string, kind: 'daily' | 'weekly', content: string): void {
-  const file = skillPath(workspace, kind);
+function globalSkillPath(kind: 'daily' | 'weekly'): string {
+  return path.join(
+    lorraConfigDir(),
+    'skills',
+    kind === 'daily' ? 'daily-review.md' : 'deep-review.md',
+  );
+}
+
+/** 清空全局技能目录(测试文件内共享同一 LORRA_E2E_USERDATA,防用例间泄漏)。 */
+function resetGlobalSkills(): void {
+  rmSync(path.join(lorraConfigDir(), 'skills'), { recursive: true, force: true });
+}
+
+/** 模拟用户已放置/修改技能文件(写全局路径;父目录可能尚不存在)。 */
+function writeSkill(_workspace: string, kind: 'daily' | 'weekly', content: string): void {
+  const file = globalSkillPath(kind);
   mkdirSync(path.dirname(file), { recursive: true });
   writeFileSync(file, content, 'utf8');
 }
@@ -82,6 +99,8 @@ describe('generateReview（技能文件方法论）', () => {
     workspace = mkdtempSync(path.join(tmpdir(), 'lorra-review-ws-'));
     storeDir = mkdtempSync(path.join(tmpdir(), 'lorra-review-store-'));
     store = expectOk<ReviewStore>(ReviewStore.open(storeDir));
+    // 全局技能目录:文件内共享同一 LORRA_E2E_USERDATA,先清空防用例间泄漏。
+    resetGlobalSkills();
     // OFK bundle:概念 + 新鲜日摘要(2099)→ ensureDayCompiled 不触发真实模型。
     userdata = freshUserData();
     await seedConcept({
@@ -105,9 +124,11 @@ describe('generateReview（技能文件方法论）', () => {
     rmSync(userdata, { recursive: true, force: true });
   });
 
-  it('首用播种 daily: 技能文件缺失时字节级原样复制内置种子, 并以种子内容生成', async () => {
-    const skill = skillPath(workspace, 'daily');
-    expect(existsSync(skill)).toBe(false);
+  it('全局技能缺失时内置种子兜底 daily: 不写盘, prompt 用种子方法论', async () => {
+    const wsSkill = skillPath(workspace, 'daily');
+    const globalSkill = globalSkillPath('daily');
+    expect(existsSync(wsSkill)).toBe(false);
+    expect(existsSync(globalSkill)).toBe(false);
 
     let captured = '';
     const invoke = vi.fn<ModelInvoke>(async (prompt) => {
@@ -122,18 +143,20 @@ describe('generateReview（技能文件方法论）', () => {
       }),
     );
 
-    // 种子文件被创建,且与内置种子字节级一致（MUST NOT 改写/摘要）。
-    expect(existsSync(skill)).toBe(true);
-    expect(readFileSync(skill).equals(readFileSync(DAILY_SEED))).toBe(true);
-    // 以种子内容生成: prompt 含种子方法论片段（「全局概览」三层结构指引）。
+    // 生成器只读 + fallback,不写盘(写盘由启动期 seedBuiltinSkills 负责)。
+    expect(existsSync(wsSkill)).toBe(false);
+    expect(existsSync(globalSkill)).toBe(false);
+    // 兜底内容 = 内置种子: prompt 含种子方法论片段(「全局概览」三层结构指引),
+    // 且与 builtin-skill-seeds/daily-review.md 字节一致(?raw 保真 CRLF)。
     expect(captured).toContain('全局概览');
+    expect(getBuiltinSkillSeed('daily-review')).toBe(readFileSync(DAILY_SEED, 'utf8'));
     expect(meta.kind).toBe('daily');
     expect(expectOk<ReviewMeta[]>(store.list())).toHaveLength(1);
   });
 
-  it('首用播种 deep: weekly 使用 deep-review.md, 字节级复制, prompt 用其内容', async () => {
-    const skill = skillPath(workspace, 'weekly');
-    expect(existsSync(skill)).toBe(false);
+  it('全局技能缺失时内置种子兜底 deep: weekly 用 deep-review 种子, prompt 用其内容', async () => {
+    const wsSkill = skillPath(workspace, 'weekly');
+    expect(existsSync(wsSkill)).toBe(false);
 
     let captured = '';
     const invoke = vi.fn<ModelInvoke>(async (prompt) => {
@@ -147,14 +170,14 @@ describe('generateReview（技能文件方法论）', () => {
       ),
     );
 
-    expect(existsSync(skill)).toBe(true);
-    expect(readFileSync(skill).equals(readFileSync(DEEP_SEED))).toBe(true);
+    expect(existsSync(wsSkill)).toBe(false);
+    expect(existsSync(globalSkillPath('weekly'))).toBe(false);
+    expect(getBuiltinSkillSeed('deep-review')).toBe(readFileSync(DEEP_SEED, 'utf8'));
     expect(captured).toContain('项目 Roadmap 分析'); // deep 种子三维度之一
     expect(meta.kind).toBe('weekly');
   });
 
-  it('个性化修改生效: 用户修改技能文件后再生成, prompt 用修改后内容且文件不被覆盖', async () => {
-    const skill = skillPath(workspace, 'daily');
+  it('个性化修改生效: 用户改全局技能文件后再生成, prompt 用修改后内容且文件不被覆盖', async () => {
     const custom = 'CUSTOM-METHODOLOGY: 重点分析 token 用量与工具效率\n';
     writeSkill(workspace, 'daily', custom);
 
@@ -166,8 +189,9 @@ describe('generateReview（技能文件方法论）', () => {
     await generateReview(daily(), { invoke, store, workspacePath: workspace });
 
     expect(captured).toContain('CUSTOM-METHODOLOGY');
-    // 种子只在缺失时播种:已有文件保持用户修改,不被覆盖。
-    expect(readFileSync(skill, 'utf8')).toBe(custom);
+    // 生成器只读:已有文件保持用户修改,不被覆盖;工作区路径不产生副本。
+    expect(readFileSync(globalSkillPath('daily'), 'utf8')).toBe(custom);
+    expect(existsSync(skillPath(workspace, 'daily'))).toBe(false);
   });
 
   it('成功路径: 组装→prompt(技能内容+payload)→invoke→存档→返回 meta（无 modules）', async () => {
@@ -270,6 +294,7 @@ describe('generateReview 蒸馏 hook（6.4）', () => {
     workspace = mkdtempSync(path.join(tmpdir(), 'lorra-review-ws-'));
     storeDir = mkdtempSync(path.join(tmpdir(), 'lorra-review-store-'));
     store = expectOk<ReviewStore>(ReviewStore.open(storeDir));
+    resetGlobalSkills();
     userdata = freshUserData();
     await seedConcept({
       day: '2026-08-08',

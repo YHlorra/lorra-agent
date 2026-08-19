@@ -49,6 +49,7 @@ export interface LorraMock {
     checkUpdates: Mock;
     updateAll: Mock;
     setWsEnabled: Mock;
+    create: Mock;
   };
   agentPlugins: {
     xray: Mock;
@@ -166,6 +167,12 @@ export function makeLorraMock(): LorraMock {
         Promise.resolve({ ok: true as const, value: { updated: [], skipped: [] } }),
       ),
       setWsEnabled: vi.fn(() => Promise.resolve({ ok: true as const, value: undefined })),
+      create: vi.fn(() =>
+        Promise.resolve({
+          ok: true as const,
+          value: { name: 'mock-skill', filePath: '/test/workspace/.lorra/skills/mock-skill.md' },
+        }),
+      ),
     },
     // 插件页(plan S5):agentPlugins 信封 = SerializedResult 直透;默认空 xray。
     agentPlugins: {

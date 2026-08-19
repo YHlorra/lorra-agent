@@ -5,7 +5,7 @@ import type {
   ExtensionFactory as SdkExtensionFactory,
 } from '@earendil-works/pi-coding-agent';
 import type { WebContents } from 'electron';
-import type { AgentEvent } from '../../shared/agent-events';
+import type { AgentEvent, SessionStatus } from '../../shared/agent-events';
 import type {
   ArchivalAuditDto,
   CoreProjectionDto,
@@ -54,6 +54,8 @@ export type BlockEmitter = (payload: {
   target: string;
   callId?: string;
   safetyNote: string;
+  /** D6:拦截器 per-session 注入,并发时按会话精确路由 blocked 事件。 */
+  sessionId?: string;
 }) => void;
 
 export interface SendResult {
@@ -68,6 +70,15 @@ export interface SendResult {
  */
 export type ApprovalDecision = 'allowOnce' | 'allowAlways' | 'deny';
 
+/**
+ * 会话可靠性常量(2026-08-19, change session-reliability-multi-session)。
+ * 集中定义于此供 driver 与测试引用。
+ */
+export const APPROVAL_TIMEOUT_MS = 120_000; // 审批等待用户裁决上限,到期自动 deny
+export const ABORT_TIMEOUT_MS = 10_000; // SDK abort 竞速上限,超时尽力 abortBash 后返回
+export const STUCK_TIMEOUT_MS = 300_000; // busy 会话零事件判卡住阈值
+export const WATCHDOG_SCAN_MS = 30_000; // 空闲看门狗轮询间隔
+
 interface PendingApproval {
   sessionId: string;
   toolName: string;
@@ -76,6 +87,8 @@ interface PendingApproval {
   state: 'pending' | 'resolved';
   /** 用户裁决回执:respondApproval 时调用,resolve 拦截器挂起的等待。 */
   resolve: (decision: ApprovalDecision) => void;
+  /** 审批 deadline 哨兵:到期自动 deny;裁决(含超时)后 clearTimeout。 */
+  timer?: ReturnType<typeof setTimeout>;
 }
 
 export interface DriverOptions {
@@ -114,6 +127,8 @@ export class LorraDriver {
   // 分级审批:pending 审批模态目 + 会话内已放行 (toolName,target) 注册表。
   private approvals = new Map<string, PendingApproval>();
   private approvedOnce = new Map<string, boolean>();
+  // 空闲看门狗(2026-08-19):busy 会话零事件超时扫描定时器,懒启动。
+  private watchdogTimer: ReturnType<typeof setInterval> | null = null;
 
   constructor(private readonly opts: DriverOptions) {}
 
@@ -142,11 +157,20 @@ export class LorraDriver {
     target: string;
     reason: string;
     callId?: string;
+    /** D6:拦截器 per-session 注入;并发时缺失才回退活跃会话。 */
+    sessionId?: string;
   }): Promise<ApprovalDecision> {
-    const sessionId = this.registry.activeRecord()?.sessionId;
+    // D6:优先显式 sessionId(拦截器 per-session 注入),缺失才回退
+    // activeRecord——并发多会话时审批归属不再挂错会话。
+    const sessionId = payload.sessionId ?? this.registry.activeRecord()?.sessionId;
     if (!sessionId) return Promise.resolve('deny');
     const approvalId = crypto.randomUUID();
     const decision = new Promise<ApprovalDecision>((resolve) => {
+      // 审批 deadline 哨兵:用户裁决(respondApproval)或超时自动 deny 走同一
+      // resolveApproval 通道,任一先到即裁决,哨兵随之 clearTimeout(无泄漏)。
+      const timer = setTimeout(() => {
+        this.resolveApproval(approvalId, 'deny', true);
+      }, APPROVAL_TIMEOUT_MS);
       this.approvals.set(approvalId, {
         sessionId,
         toolName: payload.toolName,
@@ -154,6 +178,7 @@ export class LorraDriver {
         reason: payload.reason,
         state: 'pending',
         resolve,
+        timer,
       });
     });
     const seq = this.registry.nextSeq(sessionId);
@@ -186,14 +211,26 @@ export class LorraDriver {
     approvalId: string,
     decision: ApprovalDecision,
   ): Promise<void> {
+    if (!this.approvals.has(approvalId)) throw new Error('approval not found');
+    this.resolveApproval(approvalId, decision, false);
+  }
+
+  /**
+   * 审批统一 resolve 通道(2026-08-19):respondApproval 与审批 deadline 哨兵共用,
+   * 保证「过期自动 deny」与「用户裁决」行为一致(含事件、注册表、哨兵清理)。
+   * resolved 幂等;remove=true 时裁决后从 approvals 移除(超时/abort/看门狗场景)。
+   */
+  private resolveApproval(approvalId: string, decision: ApprovalDecision, remove: boolean): void {
     const approval = this.approvals.get(approvalId);
-    if (!approval) throw new Error('approval not found');
+    if (!approval) return; // 已被其它路径裁决/移除,幂等跳过
     if (approval.state === 'resolved') return; // 重复裁决幂等(乐观 UI + 事件双路径)
     approval.state = 'resolved';
+    if (approval.timer) clearTimeout(approval.timer);
     if (decision === 'allowAlways') {
       this.approvedOnce.set(this.approvalKey(approval.toolName, approval.target), true);
     }
     approval.resolve(decision);
+    if (remove) this.approvals.delete(approvalId);
     const seq = this.registry.nextSeq(approval.sessionId);
     const event: AgentEvent = {
       type: 'approval.resolved',
@@ -309,6 +346,15 @@ export class LorraDriver {
   }
 
   async openSession(sessionId: string): Promise<{ sessionId: string }> {
+    // D5(session-reliability-multi-session):已注册会话(后台运行/已开)
+    // 直接复用——不二次 persistence.open 双开同一 JSONL(否则泄漏 handle 并打断
+    // 在途 agent)。attachSessionSubscription 幂等:先摘旧订阅再重接 + 重放最新进度。
+    const existing = this.registry.get(sessionId);
+    if (existing) {
+      this.subscribeWebContentsToSession(sessionId);
+      this.attachSessionSubscription(existing.piSessionHandle);
+      return { sessionId };
+    }
     // SessionInfo.path points straight at the JSONL the SDK wrote — no
     // separate id→path index needed (drops resolveJsonlPath duplication).
     const sessions = await this.opts.persistence.list(this.opts.workspacePath);
@@ -325,6 +371,16 @@ export class LorraDriver {
   }
 
   async continueRecent(): Promise<{ sessionId: string }> {
+    // D5:driver 已注册该工作区会话时,复用最近活跃者(该 driver 即属当前工作区,
+    // registry 内记录必属本工作区)——避免切回工作区时 continueRecent 二次 build
+    // 双开后台会话。registry 空才落 persistence.continueRecent。
+    const records = this.registry.allRecords();
+    if (records.length > 0) {
+      const recent = records.reduce((a, b) => (b.lastActivityAt > a.lastActivityAt ? b : a));
+      this.subscribeWebContentsToSession(recent.sessionId);
+      this.attachSessionSubscription(recent.piSessionHandle);
+      return { sessionId: recent.sessionId };
+    }
     const handle = await this.opts.persistence.continueRecent(this.opts.workspacePath);
     const sessionId = handle.sessionId;
     this.registry.register(sessionId, handle);
@@ -354,6 +410,8 @@ export class LorraDriver {
     const sessionId = handle.sessionId;
     const record = this.registry.get(sessionId);
     record?.unsubscribe?.();
+    // 首次注册会话即启动空闲看门狗(幂等,已有定时器则跳过)。
+    this.ensureWatchdog();
     const mapper = new EventMapper({
       sessionId,
       nextSeq: () => this.registry.nextSeq(sessionId),
@@ -407,6 +465,9 @@ export class LorraDriver {
       if (mapped) {
         this.workingMemory.applyEvent(mapped);
         this.router.emit(sessionId, mapped);
+        // 看门狗基准:任何活动事件刷新,零事件超时判卡住才不会误杀正常会话。
+        const activeRec = this.registry.get(sessionId);
+        if (activeRec) activeRec.lastActivityAt = Date.now();
       }
       const status = mapper.statusForEvent(rawEvent);
       const rec = this.registry.get(sessionId);
@@ -477,8 +538,10 @@ export class LorraDriver {
     }
 
     if (record.status !== 'idle') {
-      const active = this.registry.activeRecord();
-      return { accepted: false, busySessionId: active?.sessionId };
+      // T9(session-reliability-multi-session):per-session busy 判定。
+      // 旧实现回退全局 activeRecord——并发时可能指向别的会话 A,误导调用方。
+      // 目标会话自身 busy 即拒绝并如实上报,不依赖全局猜测。
+      return { accepted: false, busySessionId: record.sessionId };
     }
 
     const promptText = await this.maybeInjectMemoryContext(record, text);
@@ -505,16 +568,7 @@ export class LorraDriver {
       })
       .catch((error: unknown) => {
         this.registry.updateStatus(sessionId, 'errored');
-        const seq = this.registry.nextSeq(sessionId);
-        const statusEvent: AgentEvent = {
-          type: 'session.status',
-          sessionId,
-          eventId: crypto.randomUUID(),
-          seq,
-          ts: Date.now(),
-          status: 'errored',
-        };
-        this.router.emit(sessionId, statusEvent);
+        this.emitSessionStatus(sessionId, 'errored');
         console.error(`[lorra-driver] prompt failed for session ${sessionId}:`, error);
       });
 
@@ -601,19 +655,96 @@ export class LorraDriver {
     return entries.some((e) => e.type === 'message' && isUserMessage(e.message));
   }
 
+  /**
+   * 有界中止(2026-08-19):四步重排,abort 永不挂起。
+   * ① 先放行该会话挂起审批(deny) → 拦截器 block+terminate → agent 回合能结束
+   * ② 立即上报 aborted 状态 + 事件(渲染端 UI 由 session.status 事件驱动,立即解 busy)
+   * ③ 有界 SDK abort(竞速 ABORT_TIMEOUT_MS,超时尽力 abortBash 后照常返回)
+   * ④ 收尾:临时态清理保持现状(approvedOnce 为跨会话 allowAlways 注册表,不清)
+   */
   async abort(sessionId: string): Promise<void> {
     const record = this.registry.get(sessionId);
     if (!record) return;
-    await record.piSessionHandle.abort();
+    this.releasePendingApprovals(sessionId);
     this.registry.updateStatus(sessionId, 'aborted');
-    // 该会话挂起的审批模态一并清掉(裁决已无意义):resolve deny 让拦截器
-    // 返回 block + terminate,避免 agent 挂起等待永不裁决的审批。
+    this.emitSessionStatus(sessionId, 'aborted');
+    await this.boundedAbort(record);
+  }
+
+  /** 放行指定会话的全部挂起审批(deny + 移除 + 事件),解拦截器挂起。 */
+  private releasePendingApprovals(sessionId: string): void {
     for (const [id, approval] of this.approvals) {
       if (approval.sessionId === sessionId) {
-        approval.state = 'resolved';
-        approval.resolve('deny');
-        this.approvals.delete(id);
+        this.resolveApproval(id, 'deny', true);
       }
+    }
+  }
+
+  /**
+   * 有界 SDK abort:与 ABORT_TIMEOUT_MS 竞速,超时尽力 abortBash(与 SDK
+   * dispose 行为对齐)后返回——无论 SDK 是否配合,本方法有确定返回。
+   */
+  private async boundedAbort(record: SessionRecord): Promise<void> {
+    const settled = await Promise.race([
+      record.piSessionHandle.abort().then(
+        () => true,
+        () => true,
+      ),
+      new Promise<boolean>((resolve) => setTimeout(() => resolve(false), ABORT_TIMEOUT_MS)),
+    ]);
+    if (!settled) {
+      const handle = record.piSessionHandle as unknown as { abortBash?: () => void };
+      try {
+        handle.abortBash?.();
+      } catch {
+        // best-effort:abortBash 异常不影响 abort 返回
+      }
+    }
+  }
+
+  /** 会话状态事件统一出口:updateStatus 后调用,通知渲染端状态流转。 */
+  private emitSessionStatus(sessionId: string, status: SessionStatus): void {
+    const seq = this.registry.nextSeq(sessionId);
+    const event: AgentEvent = {
+      type: 'session.status',
+      sessionId,
+      eventId: crypto.randomUUID(),
+      seq,
+      ts: Date.now(),
+      status,
+    };
+    this.router.emit(sessionId, event);
+  }
+
+  /**
+   * 空闲看门狗(2026-08-19):懒启动 setInterval 扫描 busy 会话,
+   * 零事件超 STUCK_TIMEOUT_MS → 有界中止 + errored(区别于用户主动 aborted)。
+   */
+  private ensureWatchdog(): void {
+    if (this.watchdogTimer) return;
+    this.watchdogTimer = setInterval(() => this.scanStuckSessions(), WATCHDOG_SCAN_MS);
+  }
+
+  private scanStuckSessions(): void {
+    const now = Date.now();
+    for (const record of this.registry.allRecords()) {
+      if (record.status !== 'streaming' && record.status !== 'tool-running') continue;
+      if (now - record.lastActivityAt <= STUCK_TIMEOUT_MS) continue;
+      // 忙会话零事件超时:判卡住 → 强制有界中止,状态置 errored 上报。
+      this.releasePendingApprovals(record.sessionId);
+      this.registry.updateStatus(record.sessionId, 'errored');
+      this.emitSessionStatus(record.sessionId, 'errored');
+      void this.boundedAbort(record).catch(() => {
+        // best-effort:看门狗 abort 失败不重试,会话已标 errored 由用户重发。
+      });
+    }
+  }
+
+  /** 会话清空后停表,避免进程残留空转定时器。 */
+  private stopWatchdogIfIdle(): void {
+    if (this.watchdogTimer && this.registry.allRecords().length === 0) {
+      clearInterval(this.watchdogTimer);
+      this.watchdogTimer = null;
     }
   }
 
@@ -635,6 +766,7 @@ export class LorraDriver {
     this.workingMemory.clear(sessionId);
     this.lastArchivalAudit.delete(sessionId);
     this.registry.remove(sessionId);
+    this.stopWatchdogIfIdle();
   }
 
   async shutdownAll(): Promise<void> {
@@ -643,12 +775,14 @@ export class LorraDriver {
     this.lastArchivalAudit.clear();
     // 跨工作区/重启的「已批准」许可不过期保留(会话内记忆语义)。
     this.approvedOnce.clear();
-    // 挂起审批 resolve deny(拦截器兜底 block + terminate,不永久挂起)。
+    // 挂起审批 resolve deny(拦截器兜底 block + terminate,不永久挂起)+ 清哨兵。
     for (const approval of this.approvals.values()) {
+      if (approval.timer) clearTimeout(approval.timer);
       approval.state = 'resolved';
       approval.resolve('deny');
     }
     this.approvals.clear();
+    this.stopWatchdogIfIdle();
   }
 
   // ---- 编辑历史----

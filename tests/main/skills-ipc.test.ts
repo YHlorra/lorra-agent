@@ -25,6 +25,7 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
+  readFileSync,
   realpathSync,
   rmSync,
   symlinkSync,
@@ -123,7 +124,7 @@ describe('skills-ipc(lorra.skills.*,D9 契约)', () => {
   // 通道注册
   // ---------------------------------------------------------------------
 
-  it('Requirement 通道注册:八通道名与 SKILLS_IPC 常量逐字一致(install 已迁移为会话工具)', () => {
+  it('Requirement 通道注册:九通道名与 SKILLS_IPC 常量逐字一致(install 已迁移为会话工具)', () => {
     expect(electronMock.handlers.has(SKILLS_IPC.xray)).toBe(true);
     expect(electronMock.handlers.has(SKILLS_IPC.setEnabled)).toBe(true);
     expect(electronMock.handlers.has(SKILLS_IPC.cleanDangling)).toBe(true);
@@ -132,6 +133,7 @@ describe('skills-ipc(lorra.skills.*,D9 契约)', () => {
     expect(electronMock.handlers.has(SKILLS_IPC.updateAll)).toBe(true);
     expect(electronMock.handlers.has(SKILLS_IPC.setWsEnabled)).toBe(true);
     expect(electronMock.handlers.has(SKILLS_IPC.read)).toBe(true);
+    expect(electronMock.handlers.has(SKILLS_IPC.create)).toBe(true);
   });
 
   // ---------------------------------------------------------------------
@@ -352,15 +354,24 @@ describe('skills-ipc(lorra.skills.*,D9 契约)', () => {
     expect(raw.workspaceSkillOverrides?.[wsReal]).toEqual([]);
   });
 
-  it('Scenario setWsEnabled 系统管理种子 → system-managed-skill「由系统管理」', async () => {
+  it('Scenario setWsEnabled 复盘种子(2026-08-18 起普通技能)→ ok;系统管理种子仍拒', async () => {
+    // daily-review 已不是系统管理:在发现集合内即可正常停用。
+    writeWorkspaceSkill(ws, 'daily-review', '复盘技能');
     const res = await call<void>(SKILLS_IPC.setWsEnabled, {
       name: 'daily-review',
       enabled: false,
     });
-    expect(res.ok).toBe(false);
-    if (!res.ok) {
-      expect(res.error.code).toBe('system-managed-skill');
-      expect(res.error.message).toContain('系统管理');
+    expect(res.ok).toBe(true);
+
+    // memory-maintenance 仍是系统管理种子:无论扫描状态都拒。
+    const managed = await call<void>(SKILLS_IPC.setWsEnabled, {
+      name: 'memory-maintenance',
+      enabled: false,
+    });
+    expect(managed.ok).toBe(false);
+    if (!managed.ok) {
+      expect(managed.error.code).toBe('system-managed-skill');
+      expect(managed.error.message).toContain('系统管理');
     }
   });
 
@@ -508,5 +519,103 @@ describe('skills-ipc read(lorra.skills.read,/skill 触发)', () => {
       expect(res.value.name).toBe('skills');
       expect(res.value.content).toBe('平铺技能正文');
     }
+  });
+});
+
+// -------------------------------------------------------------------------
+// create(lorra.skills.create,手动新建,2026-08-18)
+// -------------------------------------------------------------------------
+
+describe('skills-ipc create(lorra.skills.create,手动新建)', () => {
+  let home: string;
+  let ws: string;
+  let wsReal: string;
+
+  beforeEach(async () => {
+    home = mkdtempSync(path.join(tmpdir(), 'lorra-sk-ipc-create-'));
+    ws = path.join(home, 'work');
+    mkdirSync(path.join(ws, '.git'), { recursive: true });
+    wsReal = realpathSync(ws);
+    electronMock.userData = mkdtempSync(path.join(tmpdir(), 'lorra-sk-ipc-create-settings-'));
+    vi.stubEnv('LORRA_E2E_USERDATA', home);
+    vi.spyOn(os, 'homedir').mockReturnValue(home);
+    await writeSettings({ recentWorkspaces: [ws] });
+    electronMock.handlers.clear();
+    registerSkillsIpc();
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.restoreAllMocks();
+    electronMock.userData = '';
+    rmSync(home, { recursive: true, force: true, maxRetries: 10, retryDelay: 250 });
+  });
+
+  it('Scenario 合法 name+content → 写 <ws>/.lorra/skills/<name>.md,返回 name+filePath', async () => {
+    const body = '---\nname: my-flow\ndescription: 测试技能\n---\n\n正文\n';
+    const res = await call<{ name: string; filePath: string }>(SKILLS_IPC.create, {
+      name: 'my-flow',
+      content: body,
+    });
+
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    expect(res.value.name).toBe('my-flow');
+    expect(res.value.filePath).toBe(path.join(wsReal, '.lorra', 'skills', 'my-flow.md'));
+    expect(existsSync(res.value.filePath)).toBe(true);
+    expect(readFileSync(res.value.filePath, 'utf8')).toBe(body);
+  });
+
+  it('Scenario 目标已存在 → Err skill-already-exists(不覆写用户文件)', async () => {
+    const target = path.join(ws, '.lorra', 'skills', 'dup.md');
+    mkdirSync(path.dirname(target), { recursive: true });
+    writeFileSync(target, '原有内容', 'utf8');
+
+    const res = await call<{ name: string; filePath: string }>(SKILLS_IPC.create, {
+      name: 'dup',
+      content: '新内容',
+    });
+
+    expect(res.ok).toBe(false);
+    if (!res.ok) {
+      expect(res.error.code).toBe('skill-already-exists');
+      expect(res.error.message).toContain('技能已存在');
+    }
+    expect(readFileSync(target, 'utf8')).toBe('原有内容');
+  });
+
+  it('Scenario 非法 name(大写/连字符开头/连字符结尾/空)→ invalid-skill-name', async () => {
+    for (const name of ['MyFlow', '-flow', 'flow-', '']) {
+      const res = await call<{ name: string; filePath: string }>(SKILLS_IPC.create, {
+        name,
+        content: 'body',
+      });
+      expect(res.ok).toBe(false);
+      if (!res.ok) expect(res.error.code).toBe('invalid-skill-name');
+    }
+    // 非法名不落任何文件。
+    expect(existsSync(path.join(ws, '.lorra', 'skills'))).toBe(false);
+  });
+
+  it('Scenario 空 content → invalid-skill-content', async () => {
+    const res = await call<{ name: string; filePath: string }>(SKILLS_IPC.create, {
+      name: 'my-flow',
+      content: '',
+    });
+    expect(res.ok).toBe(false);
+    if (!res.ok) {
+      expect(res.error.code).toBe('invalid-skill-content');
+      expect(res.error.message).toContain('技能内容不能为空');
+    }
+  });
+
+  it('Scenario 显式 wsPath 不存在 → invalid-workspace-path', async () => {
+    const res = await call<{ name: string; filePath: string }>(SKILLS_IPC.create, {
+      name: 'my-flow',
+      content: 'body',
+      wsPath: path.join(home, 'no-such-ws'),
+    });
+    expect(res.ok).toBe(false);
+    if (!res.ok) expect(res.error.code).toBe('invalid-workspace-path');
   });
 });

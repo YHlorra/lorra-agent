@@ -315,6 +315,14 @@ interface LorraSkillsApi {
   ): Promise<
     import('./shared/result').SerializedResult<import('./shared/skills-api').SkillReadResult>
   >;
+  // 2026-08-18 手动新建:写 <ws>/.lorra/skills/<name>.md。
+  create(args: {
+    name: string;
+    content: string;
+    wsPath?: string;
+  }): Promise<
+    import('./shared/result').SerializedResult<import('./shared/skills-api').SkillCreatedResult>
+  >;
 }
 
 // ── 输入栏剪贴板(2026-08-14 粘贴图片)──

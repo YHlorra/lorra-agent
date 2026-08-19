@@ -1,12 +1,12 @@
 import { Minus, Moon, PanelLeftClose, PanelLeftOpen, Square, Sun, X } from 'lucide-react';
 import type { JSX } from 'react';
-import { useCallback, useEffect, useReducer, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
 import { useAppStore } from '@/lib/app-store';
 import type { SlashCommandName } from '@/lib/slash-commands';
 import { applyThemeClass } from '@/lib/theme';
 import type { AgentEvent, SessionStatus } from '../shared/agent-events';
 import type { Annotation, AnnotationDraft } from '../shared/annotations';
-import type { LorraError, SerializedResult } from '../shared/result';
+import type { SerializedResult } from '../shared/result';
 import type { ReviewMeta } from '../shared/review-api';
 import { AppShell } from './app-shell';
 import { ChatPane } from './chat-pane';
@@ -18,7 +18,7 @@ import { MemoryPage } from './memory-page';
 import { useChatModelState } from './model-hooks';
 import { PluginsPage } from './plugins-page';
 import { ProvidersPage } from './providers-page';
-import { initialReducerState, reducer } from './reducer';
+import { deriveIndicator, initialReducerState, reducer, type SessionIndicator } from './reducer';
 import { SettingsPage } from './settings-page';
 import { ShortcutsDialog } from './shortcuts-dialog';
 import { Sidebar } from './sidebar';
@@ -58,6 +58,26 @@ export function App(): JSX.Element {
   // 阅读编辑合一:编辑期间跳过 tool.end 自动重取(AI 写盘不冲掉用户编辑)。
   const [isEditingFile, setIsEditingFile] = useState(false);
   const sessionState = activeSessionId ? state.sessions[activeSessionId] : undefined;
+  // 会话栏状态指示灯(2026-08-19):红=卡住/黄=近期空闲/绿=运行中/灰=无新活动。
+  // 卡住(90s 无新事件)与「近期空闲→灰」都依赖「当前时间 - 最后事件」,事件驱动重渲染
+  // 不会推进时间,故存在会随时间变化的态(running/idle)时用 15s tick 触发重判
+  // (stuck 是稳定红,不含)。
+  const [staleTick, setStaleTick] = useState(0);
+  const sessionIndicators = useMemo(() => {
+    const now = Date.now();
+    const out: Record<string, SessionIndicator> = {};
+    for (const [sid, s] of Object.entries(state.sessions)) out[sid] = deriveIndicator(s, now);
+    return out;
+    // staleTick 仅驱动超时重判;state.sessions 引用随事件更新,两者都在 deps。
+  }, [state.sessions, staleTick]);
+  const hasTimeSensitiveState = Object.values(sessionIndicators).some(
+    (i) => i === 'running' || i === 'idle',
+  );
+  useEffect(() => {
+    if (!hasTimeSensitiveState) return;
+    const id = window.setInterval(() => setStaleTick((t) => t + 1), 15_000);
+    return () => window.clearInterval(id);
+  }, [hasTimeSensitiveState]);
   // 稳定空引用(memo 性能,2026-08-13):无会话时避免每个渲染都换新数组身份。
   const events = sessionState?.events ?? EMPTY_EVENTS;
   const page = useAppStore((s) => s.page);
@@ -714,6 +734,15 @@ export function App(): JSX.Element {
     setPage('workspace');
   }, [chatModel.refresh, setPage]);
 
+  /** 胶囊仓切换模型:setDefault 写真相源 + 本地 refresh 同步显示;最近使用由胶囊侧记录。 */
+  const handleModelChanged = useCallback(
+    async (providerId: string, modelId: string) => {
+      await window.lorra.models.setDefault({ providerId, modelId });
+      await chatModel.refresh();
+    },
+    [chatModel.refresh],
+  );
+
   /** 今日页点击会话块下钻:切工作区(若不同)+ 开会话,复用既有动作,不新造。 */
   const openTodaySession = useCallback(
     (workspace: string, sessionId: string) => {
@@ -840,6 +869,7 @@ export function App(): JSX.Element {
                     <Sidebar
                       activeSessionId={activeSessionId}
                       sessionHistory={sessionHistory}
+                      sessionIndicators={sessionIndicators}
                       sessionBootstrapping={sessionBootstrapping}
                       activeFileId={activeFileId}
                       showHiddenFiles={showHiddenFiles}
@@ -878,6 +908,8 @@ export function App(): JSX.Element {
                   modelAvailable={chatModel.modelAvailable}
                   modelLoading={chatModel.loading}
                   defaultModelName={chatModel.defaultModelName}
+                  defaultCurrent={chatModel.current}
+                  onModelChanged={handleModelChanged}
                   inlineError={inlineError}
                   onOpenProviders={() => setPage('providers')}
                   onSend={sendMessage}

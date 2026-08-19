@@ -124,6 +124,48 @@ function loadInlineExtension(
   return extension;
 }
 
+/**
+ * additionalSkillPaths 组装（2026-08-18 提取,供单测直接验证路径门控）：
+ * - base = [<ws>/.lorra/skills, ~/.agents/skills]（恒在）
+ * - 自定义收集根存在且不与 base 重复 → 加入（默认根 = ~/.agents/skills 时天然去重）
+ * - ~/.claude/skills（三路径兼容,2026-08-18）存在才入 —— 未装 Claude Code 不受影响
+ * - agent-plugin 技能根恒在最后（第 6 源）
+ */
+export function buildAdditionalSkillPaths(opts: {
+  wsRealpath: string;
+  collectionRoot: string;
+  claudeSkills: string;
+  agentPluginSkillRoots: string[];
+}): string[] {
+  const collectionRootReal = path.resolve(opts.collectionRoot);
+  let collectionRootExists = false;
+  try {
+    collectionRootExists = statSync(collectionRootReal).isDirectory();
+  } catch {
+    collectionRootExists = false;
+  }
+  const baseSkillPaths = [
+    path.join(opts.wsRealpath, '.lorra', 'skills'),
+    path.join(os.homedir(), '.agents', 'skills'),
+  ];
+  const collectionRootDuplicates = baseSkillPaths.some(
+    (p) => path.resolve(p).toLowerCase() === collectionRootReal.toLowerCase(),
+  );
+  let claudeSkillsExists = false;
+  try {
+    claudeSkillsExists = statSync(opts.claudeSkills).isDirectory();
+  } catch {
+    claudeSkillsExists = false;
+  }
+  return [
+    ...(collectionRootDuplicates || !collectionRootExists
+      ? baseSkillPaths
+      : [...baseSkillPaths, collectionRootReal]),
+    ...(claudeSkillsExists ? [opts.claudeSkills] : []),
+    ...opts.agentPluginSkillRoots,
+  ];
+}
+
 export async function createSessionPersistence(opts: {
   workspacePath: string;
   emitBlocked: BlockEmitter;
@@ -149,6 +191,8 @@ export async function createSessionPersistence(opts: {
     target: string;
     reason: string;
     callId?: string;
+    /** D6(session-reliability-multi-session):并发时按会话精确归属审批。 */
+    sessionId?: string;
   }) => Promise<'allowOnce' | 'allowAlways' | 'deny'>;
   /** 分级审批:会话内已批准 (toolName, target) 直放。 */
   checkApproved?: (toolName: string, target: string) => boolean;
@@ -181,23 +225,11 @@ export async function createSessionPersistence(opts: {
       workspaceSkillOverrides: settings.workspaceSkillOverrides ?? {},
     });
     // 2026-08-13(技能收集批 D8):收集根可自定义后 SDK 必须发现它——自定义根技能
-    // 对 agent 不可见会直接发散「页面所见 vs agent 所见」。与既有两项 realpath
-    // 相同(默认收集根 = ~/.agents/skills)或尚不存在时不重复加入。
+    // 对 agent 不可见会直接发散「页面所见 vs agent 所见」。
     const collectionRoot = getSkillCollectionRoot(settings);
-    const collectionRootReal = path.resolve(collectionRoot);
-    let collectionRootExists = false;
-    try {
-      collectionRootExists = statSync(collectionRootReal).isDirectory();
-    } catch {
-      collectionRootExists = false;
-    }
-    const baseSkillPaths = [
-      path.join(wsRealpath, '.lorra', 'skills'),
-      path.join(os.homedir(), '.agents', 'skills'),
-    ];
-    const collectionRootDuplicates = baseSkillPaths.some(
-      (p) => path.resolve(p).toLowerCase() === collectionRootReal.toLowerCase(),
-    );
+    // 2026-08-18(内置技能批):三路径兼容 —— ~/.claude/skills 存在才入(未装 Claude
+    // Code 不受影响),门控细节见 buildAdditionalSkillPaths(单测直接验证)。
+    const claudeSkills = path.join(os.homedir(), '.claude', 'skills');
     // 第 6 源：启用的 agent-plugins 技能根（skills/ 目录，SDK 递归发现其下 SKILL.md）。
     const pluginRoot =
       settings.agentPluginRoot && settings.agentPluginRoot.trim() !== ''
@@ -207,12 +239,12 @@ export async function createSessionPersistence(opts: {
       root: pluginRoot,
       disabled: new Set(settings.disabledPlugins ?? []),
     });
-    const additionalSkillPaths = [
-      ...(collectionRootDuplicates || !collectionRootExists
-        ? baseSkillPaths
-        : [...baseSkillPaths, collectionRootReal]),
-      ...agentPluginSkills.map((s) => s.skillsRoot),
-    ];
+    const additionalSkillPaths = buildAdditionalSkillPaths({
+      wsRealpath,
+      collectionRoot,
+      claudeSkills,
+      agentPluginSkillRoots: agentPluginSkills.map((s) => s.skillsRoot),
+    });
     const services = await createAgentSessionServices({
       cwd: wsRealpath,
       agentDir: lorraConfigDir(),
@@ -250,12 +282,30 @@ export async function createSessionPersistence(opts: {
     });
     const eventBus = createEventBus();
     const runtime = createExtensionRuntime();
+    // /D6: 会话创建后回填的 sessionId,供工具回调按会话精确路由
+    // (emitMemoryRecorded / emitBlocked / requestApproval 共用)。创建后赋值,
+    // 工具调用必在创建之后发生,闭包读取时已有效(emitMemoryRecorded 既有纪律)。
+    let agentSessionId = '';
+    // D6(并发归属, session-reliability-multi-session):拦截器实例
+    // per-session,但事件回调要把本会话 sessionId 带给应用层——closure 注入。
+    // 后台工作区/并发多会话时,审批与 blocked 事件精确归属本会话,不再依赖
+    // 全局 activeRecord 猜测。
+    const requestApproval = opts.requestApproval
+      ? (payload: { toolName: string; target: string; reason: string; callId?: string }) =>
+          opts.requestApproval!({ ...payload, sessionId: agentSessionId || undefined })
+      : undefined;
+    const emitBlocked = (payload: {
+      toolName: string;
+      target: string;
+      callId?: string;
+      safetyNote: string;
+    }) => opts.emitBlocked({ ...payload, sessionId: agentSessionId || undefined });
     const safetyFactory: SdkExtensionFactory = createSafetyInterceptor({
       workspaceRoot: wsRealpath,
-      emitBlocked: opts.emitBlocked,
+      emitBlocked,
       recordEditBefore: opts.recordEditBefore,
       finalizeEdit: opts.finalizeEdit,
-      requestApproval: opts.requestApproval,
+      requestApproval,
       checkApproved: opts.checkApproved,
     });
     const safetyExtension = loadInlineExtension(safetyFactory, eventBus, runtime, 'tool-safety');
@@ -263,7 +313,6 @@ export async function createSessionPersistence(opts: {
     // 更新 / retire / search),成功写入 emit memory.recorded。emitRecorded 的
     // sessionId 由注册处闭包注入(工具执行时会话已创建);经 emitMemoryRecorded
     // 回调由应用层转发事件。getWorkspace 供 search 的 scope 过滤匹配当前工作区。
-    let agentSessionId = '';
     const customTools: ToolDefinition[] = [
       ...createWebTools({ client: webClient, backupClient: backupWebClient }),
       createMemoryTool({

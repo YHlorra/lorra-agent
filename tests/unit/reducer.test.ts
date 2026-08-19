@@ -1,10 +1,13 @@
 import fc from 'fast-check';
 import { describe, expect, it } from 'vitest';
 import {
+  deriveIndicator,
+  IDLE_RECENT_MS,
   initialReducerState,
   MAX_RECORDED_NOTICES,
   type ReducerState,
   reducer,
+  STUCK_TIMEOUT_MS,
 } from '../../src/renderer/reducer';
 import type { AgentEvent } from '../../src/shared/agent-events';
 import type { MemoryEvidence, MemoryKind } from '../../src/shared/memory-schema';
@@ -697,5 +700,71 @@ describe('reducer 记忆记录通知事件', () => {
     });
     expect(next.sessions.other?.recordedNotices).toBeUndefined();
     expect(next.sessions.active).toBeUndefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 会话栏状态指示灯(2026-08-19):deriveIndicator 派生绿/黄/红/灰
+// ---------------------------------------------------------------------------
+
+describe('reducer deriveIndicator(会话栏状态指示灯)', () => {
+  const sess = (
+    overrides: Partial<import('../../src/renderer/reducer').SessionState> &
+      Pick<import('../../src/renderer/reducer').SessionState, 'status'>,
+  ): import('../../src/renderer/reducer').SessionState => ({
+    sessionId: 's1',
+    events: [],
+    ...overrides,
+  });
+
+  it('streaming 且未超时 → running(绿)', () => {
+    expect(deriveIndicator(sess({ status: 'streaming', lastEventTs: 1000 }), 1000 + 1_000)).toBe(
+      'running',
+    );
+  });
+
+  it('tool-running 超时无进度 → stuck(红)', () => {
+    expect(
+      deriveIndicator(
+        sess({ status: 'tool-running', lastEventTs: 1000 }),
+        1000 + STUCK_TIMEOUT_MS + 1,
+      ),
+    ).toBe('stuck');
+  });
+
+  it('等审批(pendingApproval)→ 立即 stuck(红,不等超时)', () => {
+    expect(
+      deriveIndicator(
+        sess({
+          status: 'tool-running',
+          lastEventTs: Date.now(),
+          pendingApproval: {
+            approvalId: 'a1',
+            toolName: 'write',
+            target: 'D:/out.txt',
+            reason: 'approval-required',
+          },
+        }),
+      ),
+    ).toBe('stuck');
+  });
+
+  it('errored / inlineError → stuck(红)', () => {
+    expect(deriveIndicator(sess({ status: 'errored' }))).toBe('stuck');
+    expect(deriveIndicator(sess({ status: 'idle', inlineError: 'E: 磁盘满' }))).toBe('stuck');
+  });
+
+  it('近期空闲(lastEventTs 在窗口内)→ idle(黄);无新活动 → never-run(灰)', () => {
+    const now = Date.now();
+    // 5 分钟窗口内的最近活动 → 黄。
+    expect(deriveIndicator(sess({ status: 'idle', lastEventTs: now - 1_000 }), now)).toBe('idle');
+    // 从未运行(无 lastEventTs)→ 灰。
+    expect(deriveIndicator(sess({ status: 'idle', events: [], lastEventTs: undefined }), now)).toBe(
+      'never-run',
+    );
+    // 有历史但上次活动已超出窗口(历史对话,点进去未发消息)→ 灰。
+    expect(
+      deriveIndicator(sess({ status: 'idle', lastEventTs: now - IDLE_RECENT_MS - 1 }), now),
+    ).toBe('never-run');
   });
 });

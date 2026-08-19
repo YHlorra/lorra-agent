@@ -19,6 +19,7 @@ import { isExternalUrl } from './main/lib/external-url';
 import { seedPluginTemplate } from './main/ofk/plugin-template-seed';
 import { ModelConfigAdapter } from './main/pi-sdk-driver/model-config';
 import { installUncaughtHandlers } from './main/pi-sdk-driver/uncaught-handler';
+import { seedBuiltinSkills } from './main/skills/builtin-skill-seeder';
 import { registerWorkspaceHandlers } from './main/workspace/ipc';
 import { createWorkspaceRuntime, type WorkspaceRuntime } from './main/workspace/runtime';
 import { readSettings } from './main/workspace/settings';
@@ -141,6 +142,9 @@ const unavailableModelConfig = () => ({
 app.whenReady().then(async () => {
   // :插件目录播种(README + 模板;write-if-missing,失败静默)。
   seedPluginTemplate();
+  // 内置技能盘(2026-08-18):首次写 ~/.lorra/skills/,lorra 升级新增内置 .md 也会自动落盘;
+  // write-if-missing(用户编辑过不覆写),失败静默,详见 builtin-skill-seeder.ts 注释。
+  seedBuiltinSkills();
   const settings = await readSettings();
   // :main 进程语言真源与 renderer 同源(settings.json),启动即同步。
   setMainLanguage(settings.language ?? 'zh');
@@ -210,10 +214,11 @@ app.whenReady().then(async () => {
 
 app.on('window-all-closed', () => app.quit());
 
-// : abort active session + 2 s grace before exit.
+// + T10 (session-reliability-multi-session):全池收口。
+// D4 引入 driver 池后,退出必须 shutdown 全部池内 driver(后台会话随切保留),
+// 不能只收口 active driver——否则后台 driver 的会话/定时器泄漏至进程退出。
 app.on('before-quit', (event) => {
-  const driver = runtime?.getActiveDriver();
-  if (!driver) return;
+  if (!runtime) return;
   event.preventDefault();
-  void driver.shutdownAll().finally(() => app.exit());
+  void runtime.disposeAll().finally(() => app.exit());
 });

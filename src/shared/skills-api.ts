@@ -22,6 +22,8 @@ export const SKILLS_IPC = Object.freeze({
   setWsEnabled: 'lorra.skills.setWsEnabled',
   /** 读取技能文件内容（composer /skill 触发，2026-08-14）；未知技能 → skill-not-found。 */
   read: 'lorra.skills.read',
+  /** 手动新建技能（2026-08-18）：写 <ws>/.lorra/skills/<name>.md，非 git/收集链路。 */
+  create: 'lorra.skills.create',
 } as const);
 
 // ---- 预算常量（PM 拍板定稿：token 唯一单位，三级分级 2,000/4,000）----
@@ -45,12 +47,13 @@ export const SKILL_GIT_TIMEOUT_MS = 30000;
 
 // ---- 发现/健康 ----
 
-/** 技能来源：收集根 / 祖先 .agents/skills / lorra 全局库 / 用户自有 / 工作区 / agent-plugin 插件。 */
+/** 技能来源：收集根 / 祖先 .agents/skills / lorra 全局库 / 用户自有 / Claude 全局库 / 工作区 / agent-plugin 插件。 */
 export type SkillSource =
   | 'collection'
   | 'workspace'
   | 'lorra-global'
   | 'user'
+  | 'claude'
   | 'ancestor'
   | 'agent-plugin';
 
@@ -187,4 +190,10 @@ export interface SkillXray {
 export interface SkillReadResult {
   name: string;
   content: string;
+}
+
+/** 手动新建技能结果（2026-08-18）：filePath = <ws>/.lorra/skills/<name>.md。 */
+export interface SkillCreatedResult {
+  name: string;
+  filePath: string;
 }

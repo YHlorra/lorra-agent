@@ -1,16 +1,15 @@
-import { Buffer } from 'node:buffer';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { MEMORY_CONTENT_MAX_BYTES, type MemoryEntry } from '../../shared/memory-schema';
 import type { Result } from '../../shared/result';
 import { err, ok, toLorraError } from '../../shared/result';
+import { lorraConfigDir } from '../pi-sdk-driver/lorra-config-dir';
+import { getBuiltinSkillSeed } from '../skills/builtin-skill-seeder';
 import { localDateString } from './day-summary';
 // 类型级引用（esbuild 剔除 type import, 不把 node:sqlite 拉进 vitest client
 // 测试图）;方法面按 phase3-contract 定稿调用。
 import type { ProposeInput } from './memory-store';
 import { assembleReviewPayload, type ReviewPayload, type ReviewRequest } from './review-assembler';
-import dailyReviewSeed from './review-skill-seeds/daily-review.md?raw';
-import deepReviewSeed from './review-skill-seeds/deep-review.md?raw';
 import type { ReviewMeta, ReviewStore } from './review-store';
 import { truncateUtf8ToBytes } from './text-bytes';
 
@@ -37,14 +36,26 @@ export type ModelInvoke = (prompt: string) => Promise<Result<string>>;
 
 type ReviewSkillName = 'daily-review' | 'deep-review';
 
-const SEED_BY_SKILL: Record<ReviewSkillName, string> = {
-  'daily-review': dailyReviewSeed,
-  'deep-review': deepReviewSeed,
-};
+/**
+ * 复盘技能读取（2026-08-18 起全局路径）：<lorraConfigDir>/skills/<name>.md。
+ * 不再 per-workspace 播种（写盘由启动期 seedBuiltinSkills 负责，write-if-missing）；
+ * 此处只「读 + fallback」：文件缺失 → 内置种子兜底（极端情况，正常启动后文件已在）。
+ * 错误码 seed-skill-failed（2026-08-17 收敛，与 loadOrSeedSkill 同口径）。
+ */
+function loadReviewSkill(name: ReviewSkillName): Result<string> {
+  try {
+    const target = path.join(lorraConfigDir(), 'skills', `${name}.md`);
+    if (existsSync(target)) return ok(readFileSync(target, 'utf8'));
+    return ok(getBuiltinSkillSeed(name) ?? '');
+  } catch (cause) {
+    return err(toLorraError(cause, 'seed-skill-failed'));
+  }
+}
 
 /** 加载/播种 skill 文件(.lorra/skills/<name>.md):目标缺失 → 写入 seed;存在 → 原样读取。
- * 通用入口,被 review-generator / memory-maintenance / skill-meta 三处共用。
- * 错误码 seed-skill-failed(2026-08-17 收敛):三处失败模式一致(磁盘 IO/路径错误),
+ * 通用入口,被 memory-maintenance / ofk-digest 两处 per-workspace 种子共用
+ * (复盘与 lorra-meta-skill 已迁全局路径,见 builtin-skill-seeder / loadReviewSkill)。
+ * 错误码 seed-skill-failed(2026-08-17 收敛):失败模式一致(磁盘 IO/路径错误),
  * message 字段自带 ENOENT 上下文足够定位,无需细分 code。
  */
 export function loadOrSeedSkill(workspacePath: string, name: string, seed: string): Result<string> {
@@ -97,7 +108,7 @@ export async function generateReview(
     const payload = assembled.value;
 
     const skillName: ReviewSkillName = req.kind === 'weekly' ? 'deep-review' : 'daily-review';
-    const skillResult = loadOrSeedSkill(deps.workspacePath, skillName, SEED_BY_SKILL[skillName]);
+    const skillResult = loadReviewSkill(skillName);
     if (skillResult.isErr()) return skillResult;
 
     const prompt = composeReviewPrompt(skillResult.value, payload);

@@ -5,6 +5,7 @@ import { err, ok, toSerialized } from '../../shared/result';
 import {
   type CollectResult,
   SKILLS_IPC,
+  type SkillCreatedResult,
   type SkillGitStatus,
   type SkillReadResult,
   type SkillXray,
@@ -13,6 +14,7 @@ import {
   checkUpdates,
   cleanDangling,
   collectSkills,
+  createSkill,
   getSkillXray,
   readSkillContent,
   resolveWorkspacePath,
@@ -25,7 +27,7 @@ import { readSettings } from '../workspace/settings';
 /**
  * 技能管理 IPC（V1-8 + 2026-08-13 批 D9 + 2026-08-14 /skill 触发）：
  * xray / setEnabled / cleanDangling / collect / checkUpdates / updateAll /
- * setWsEnabled / read 八通道,通道名取 SKILLS_IPC 单一事实源(install 已迁移为
+ * setWsEnabled / read / create 九通道,通道名取 SKILLS_IPC 单一事实源(install 已迁移为
  * 会话内 install_skill 智能体工具,不再有前端安装通道)。
  *
  * - 信封:全部 SerializedResult({status:'ok',value} / {status:'error',error}),
@@ -134,6 +136,24 @@ export function registerSkillsIpc(): void {
         return toSerialized(err({ code: 'invalid-skill-name', message: '技能名称无效' }));
       }
       return toSerialized(await readSkillContent(args.name.trim()));
+    },
+  );
+
+  ipcMain.handle(
+    SKILLS_IPC.create,
+    async (
+      _event,
+      args?: { name?: unknown; content?: unknown; wsPath?: unknown },
+    ): Promise<SerializedResult<SkillCreatedResult>> => {
+      if (typeof args?.name !== 'string' || !/^[a-z0-9][a-z0-9-]{0,62}[a-z0-9]$/.test(args.name)) {
+        return toSerialized(err({ code: 'invalid-skill-name', message: '技能名称无效' }));
+      }
+      if (typeof args?.content !== 'string' || args.content.length === 0) {
+        return toSerialized(err({ code: 'invalid-skill-content', message: '技能内容不能为空' }));
+      }
+      const wsArg = await optionalWsPathArg(args);
+      if (wsArg.isErr()) return toSerialized(err(wsArg.error));
+      return toSerialized(await createSkill(args.name, args.content, { wsPath: wsArg.value }));
     },
   );
 }

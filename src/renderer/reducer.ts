@@ -18,6 +18,8 @@ export interface SessionState {
   events: AgentEvent[];
   /** Last consumed event id (for dedup). */
   lastEventId?: string;
+  /** 最近一次事件时间戳(会话状态指示灯:判断「运行无进度」卡住)。 */
+  lastEventTs?: number;
   /** True when a tool.blocked safety event arrived. */
   hasBlockedTool?: boolean;
   /** Latest inline error message (if any). */
@@ -133,7 +135,10 @@ export function reducer(state: ReducerState, action: ReducerAction): ReducerStat
         const sorted = upsertEvent(existing.events, ev);
         return {
           ...state,
-          sessions: { ...state.sessions, [sid]: { ...existing, events: sorted } },
+          sessions: {
+            ...state.sessions,
+            [sid]: { ...existing, events: sorted, lastEventTs: ev.ts },
+          },
         };
       }
       // Dedup by eventId.
@@ -145,6 +150,7 @@ export function reducer(state: ReducerState, action: ReducerAction): ReducerStat
         ...existing,
         events,
         lastEventId: ev.eventId,
+        lastEventTs: ev.ts,
       };
       if (ev.type === 'session.status') next.status = ev.status;
       if (ev.type === 'tool.blocked') next.hasBlockedTool = true;
@@ -245,4 +251,36 @@ export function reducer(state: ReducerState, action: ReducerAction): ReducerStat
     default:
       return state;
   }
+}
+
+/** 会话栏状态指示灯态:绿=运行中,黄=空闲,红=卡住,灰=未运行。 */
+export type SessionIndicator = 'running' | 'idle' | 'stuck' | 'never-run';
+
+/** 「运行无进度」判定为卡住的阈值:90s 内无任何 agent 事件。 */
+export const STUCK_TIMEOUT_MS = 90_000;
+
+/**
+ * 「近期空闲」判定窗口:上次活动在这个窗口内才显示黄灯(空闲);
+ * 超过则回落成灰灯(无新活动)。
+ */
+export const IDLE_RECENT_MS = 5 * 60_000;
+
+/**
+ * 由 SessionState 派生指示灯态。优先级(高→低):
+ * 出错 / 等审批 / 运行停滞 > 运行中 > 无新活动(灰) > 近期空闲(黄)。
+ * 灰灯 = 从未运行 或 上次活动已超「近期空闲」窗口(历史对话、点进去未发消息均落此态);
+ * 黄灯 = 非运行但有近期活动。
+ * `now` 注入便于测试(默认 Date.now)。
+ */
+export function deriveIndicator(s: SessionState, now = Date.now()): SessionIndicator {
+  if (s.inlineError || s.status === 'errored' || s.pendingApproval) return 'stuck';
+  if (s.status === 'streaming' || s.status === 'tool-running') {
+    // 停滞判定:仍处运行态但超过阈值无新事件 → 卡住。
+    if (s.lastEventTs !== undefined && now - s.lastEventTs > STUCK_TIMEOUT_MS) return 'stuck';
+    return 'running';
+  }
+  // 无新活动=灰:从未运行,或上次活动(历史重放的时间戳)已超「近期空闲」窗口。
+  if (s.lastEventTs === undefined || now - s.lastEventTs > IDLE_RECENT_MS) return 'never-run';
+  // 近期空闲=黄。
+  return 'idle';
 }

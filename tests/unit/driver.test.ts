@@ -145,6 +145,41 @@ describe('LorraDriver.send', () => {
       );
     });
   });
+
+  // T9(session-reliability-multi-session):per-session busy 判定。
+  // 旧实现回退全局 activeRecord,并发时可能误报别的会话——A busy 时 B 应可独立
+  // 发送,再发 A 应报 busySessionId=A 而非 B。
+  it('Given A busy 并发 B 空闲 When send B 接受、send A 拒绝且 busySessionId=A', async () => {
+    const promptA = vi.fn(async () => {});
+    const promptB = vi.fn(async () => {});
+    const handleA = {
+      sessionId: 'A',
+      sessionManager: { fileEntries: [] },
+      subscribe: vi.fn(() => () => undefined),
+      prompt: promptA,
+    };
+    const handleB = {
+      sessionId: 'B',
+      sessionManager: { fileEntries: [] },
+      subscribe: vi.fn(() => () => undefined),
+      prompt: promptB,
+    };
+    const persistence = {
+      createInMemory: vi.fn().mockResolvedValueOnce(handleA).mockResolvedValueOnce(handleB),
+    } as unknown as SessionPersistence;
+    const driver = new LorraDriver({ workspacePath: 'C:/workspace', persistence });
+    await driver.newSession(); // A
+    await driver.newSession(); // B
+
+    await expect(driver.send('A', '任务A')).resolves.toEqual({ accepted: true });
+    // B 空闲,不受 A busy 影响 → 并发会话各自独立。
+    await expect(driver.send('B', '任务B')).resolves.toEqual({ accepted: true });
+    // A 自身 busy → 拒绝且如实上报 A(不误报全局活跃的其他会话)。
+    await expect(driver.send('A', '任务A2')).resolves.toEqual({
+      accepted: false,
+      busySessionId: 'A',
+    });
+  });
 });
 
 describe('LorraDriver 重放稳定 messageId(回归:切回会话不重复追加)', () => {

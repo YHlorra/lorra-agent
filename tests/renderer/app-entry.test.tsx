@@ -26,13 +26,6 @@ async function waitForAppReady(): Promise<void> {
   await screen.findByRole('region', { name: 'Agent 对话' });
 }
 
-/** Header model-state button (the .model-state-btn in the chat header). */
-function headerModelStateBtn(): HTMLButtonElement {
-  const btn = document.querySelector('button.model-state-btn');
-  if (!btn) throw new Error('Header model-state button not found');
-  return btn as HTMLButtonElement;
-}
-
 /** Chat-pane empty-CTA button (the .pc-btn-primary inside .chat-empty-cta). */
 function chatEmptyCtaBtn(): HTMLButtonElement {
   const btn = document.querySelector('.chat-empty-cta button');
@@ -40,8 +33,13 @@ function chatEmptyCtaBtn(): HTMLButtonElement {
   return btn as HTMLButtonElement;
 }
 
+/** Composer presence 里的模型切换按钮是否存在(.composer-model-button)。 */
+function composerModelButtonExists(): boolean {
+  return document.querySelector('button.composer-model-button') !== null;
+}
+
 describe('7.3 入口跳转与空/正常态', () => {
-  it('头部 model-state 按钮: 点头部入口 → 配置页（ProvidersPage）出现', async () => {
+  it('空态 CTA: 点「连接模型」空态按钮 → 配置页（ProvidersPage）出现', async () => {
     const m = makeLorraMock();
     m.session.continueRecent.mockResolvedValue({ ok: true, value: { sessionId: 'sess-test' } });
     m.providers.catalog.mockResolvedValue({ ok: true, value: [] });
@@ -52,11 +50,11 @@ describe('7.3 入口跳转与空/正常态', () => {
     render(<App />);
 
     await waitForAppReady();
-    // Wait for chat-model-state to settle.
+    // Wait for chat-model-state to settle → 空态 CTA 出现。
     await waitFor(() => {
-      expect(headerModelStateBtn().textContent).toContain('连接模型');
+      expect(chatEmptyCtaBtn().textContent).toContain('连接模型');
     });
-    await user.click(headerModelStateBtn());
+    await user.click(chatEmptyCtaBtn());
 
     // ProvidersPage mounts. The rail has "已连接" + "默认模型" headings;
     // the "返回工作区" button replaces the workspace grid.
@@ -65,7 +63,7 @@ describe('7.3 入口跳转与空/正常态', () => {
     expect(screen.getByText('默认模型')).toBeInTheDocument();
   });
 
-  it('引导态: getAvailable=[] 且 getDefault=null → 头部 CTA + 空状态 CTA + 发送禁用', async () => {
+  it('引导态: getAvailable=[] 且 getDefault=null → 空状态 CTA + 发送禁用,无模型按钮', async () => {
     const m = makeLorraMock();
     m.session.continueRecent.mockResolvedValue({ ok: true, value: { sessionId: 'sess-test' } });
     m.providers.catalog.mockResolvedValue({ ok: true, value: [] });
@@ -79,23 +77,23 @@ describe('7.3 入口跳转与空/正常态', () => {
 
     // Wait for the chat-model-state to settle (loading → empty).
     await waitFor(() => {
-      expect(headerModelStateBtn().textContent).toContain('连接模型');
+      expect(m.models.getAvailable).toHaveBeenCalled();
     });
 
-    // 1) 头部 model-state 按钮显示引导文案「连接模型」(aria-label + visible text).
-    expect(headerModelStateBtn().getAttribute('aria-label')).toBe('连接模型');
-
-    // 2) 对话区空状态 CTA 出现: 一个独立的「连接模型」按钮 + 说明文案.
+    // 1) 对话区空状态 CTA 出现: 一个独立的「连接模型」按钮 + 说明文案.
     const ctaText = await screen.findByText('暂无可用模型，连接一个供应商开始对话。');
     expect(ctaText).toBeInTheDocument();
     expect(chatEmptyCtaBtn().textContent).toContain('连接模型');
+
+    // 2) 无默认模型 → composer 不渲染模型按钮(胶囊仓入口随之隐藏).
+    expect(composerModelButtonExists()).toBe(false);
 
     // 3) Composer 发送按钮被禁用 (modelAvailable=false).
     const send = await screen.findByRole('button', { name: '发送' });
     expect(send).toBeDisabled();
   });
 
-  it('正常态: getAvailable 非空 + getDefault 有值 → 显示默认名，无 CTA，发送可用', async () => {
+  it('正常态: getAvailable 非空 + getDefault 有值 → composer 显示模型名，无 CTA，发送可用', async () => {
     const m = makeLorraMock();
     m.session.continueRecent.mockResolvedValue({ ok: true, value: { sessionId: 'sess-test' } });
     m.providers.catalog.mockResolvedValue({ ok: true, value: [] });
@@ -123,12 +121,13 @@ describe('7.3 入口跳转与空/正常态', () => {
 
     // Wait for chat-model-state to settle.
     await waitFor(() => {
-      expect(headerModelStateBtn().textContent).toContain('Claude X');
+      expect(composerModelButtonExists()).toBe(true);
     });
 
-    // 1) 头部按钮的 aria-label 切到「打开模型供应商配置」 (spec-mandated affordance).
-    expect(headerModelStateBtn().getAttribute('aria-label')).toBe('打开模型供应商配置');
-    expect(headerModelStateBtn().textContent).toContain('Claude X');
+    // 1) composer 模型按钮(胶囊仓入口)显示默认模型名.
+    expect(document.querySelector('button.composer-model-button')?.textContent).toContain(
+      'Claude X',
+    );
 
     // 2) 不显示引导 CTA 文案.
     expect(screen.queryByText('暂无可用模型，连接一个供应商开始对话。')).toBeNull();
@@ -137,9 +136,6 @@ describe('7.3 入口跳转与空/正常态', () => {
     // 3) Composer 显示默认模型名 + 发送可用.
     const composer = await screen.findByRole('textbox', { name: '向 Agent 提问' });
     expect(composer).toBeInTheDocument();
-    // The model name appears both in the header button AND in the composer's
-    // presence row — assert presence (both places) without assuming one DOM node.
-    expect(document.querySelector('.composer-model-name')?.textContent).toBe('Claude X');
     const send = screen.getByRole('button', { name: '发送' });
     expect(send).toBeEnabled();
   });
