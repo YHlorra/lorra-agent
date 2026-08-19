@@ -53,6 +53,16 @@ jobs:
           LORRA_E2E_USERDATA: ${{ runner.temp }}\lorra-e2e-userdata
         run: npm run test:e2e
 
+      # e2e 失败时附上 test-results(页面快照 error-context.md + trace.zip),
+      # 否则 CI-only 失败只能靠猜。仅失败时上传,不占常规空间。
+      - name: Upload e2e failure artifacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-test-results
+          path: test-results/
+          if-no-files-found: ignore
+
       - name: Package Squirrel installer
         run: npx electron-forge make
 

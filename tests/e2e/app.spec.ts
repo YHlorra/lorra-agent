@@ -60,6 +60,14 @@ test.describe('lorra e2e', () => {
     try {
       const window = await app.firstWindow({ timeout: 60_000 });
       await window.waitForLoadState('domcontentloaded');
+      // CI-only 失败诊断:打印 runner 实际视口与 narrow 断点命中情况
+      //(CI e2e 自首跑从未绿过;侧栏 region 全灭疑似视口 <1050px 断点所致)。
+      console.log(
+        'E2E_DIAG viewport=',
+        JSON.stringify(window.viewportSize()),
+        'narrow=',
+        await window.evaluate(() => matchMedia('(max-width: 1050px)').matches),
+      );
 
       // 首启选择器已取消:不出现在 DOM 中。
       await expect(window.getByRole('dialog', { name: '选择工作区' })).toHaveCount(0);
@@ -132,7 +140,9 @@ test.describe('lorra e2e', () => {
 
       await window.getByRole('button', { name: '完成' }).click();
       await window.getByRole('button', { name: '返回工作区' }).click();
-      await expect(window.locator('.composer-model-name')).toHaveText(modelName as string);
+      // 2026-08-19 模型胶囊改版:composer-model-name 已被常驻按钮取代,按钮文本
+      // = 模型名 + chevron(svg 无文本),用 containText 匹配。
+      await expect(window.locator('.composer-model-button')).toContainText(modelName as string);
     } finally {
       await app.close();
     }
@@ -211,7 +221,8 @@ test.describe('lorra e2e', () => {
       await window.setViewportSize({ width: 1200, height: 700 });
 
       const fileRow = window.getByRole('treeitem', { name: 'long.md' });
-      await expect(fileRow).toBeVisible();
+      // 视口从窄切宽触发侧栏重挂载,CI 上可能超默认 5s。
+      await expect(fileRow).toBeVisible({ timeout: 30_000 });
       await fileRow.click();
       await expect(window.locator('.document-content')).toContainText('line 240');
 
@@ -315,7 +326,9 @@ test.describe('lorra e2e', () => {
 
     // Shell regions render whenever a workspace path is set, independent of
     // driver init success (driver failures are caught and logged in main.ts).
-    await expect(window.getByRole('region', { name: '会话历史' })).toBeVisible();
+    await expect(window.getByRole('region', { name: '会话历史' })).toBeVisible({
+      timeout: 30_000,
+    });
     await expect(window.getByRole('tree', { name: '文件树' })).toBeVisible();
     await expect(window.getByRole('main', { name: '当前文档' })).toBeVisible();
     await expect(window.getByRole('region', { name: 'Agent 对话' })).toBeVisible();
@@ -522,7 +535,9 @@ test.describe('lorra e2e', () => {
     try {
       const window = await app.firstWindow({ timeout: 60_000 });
       await window.waitForLoadState('domcontentloaded');
-      await expect(window.getByRole('region', { name: '会话历史' })).toBeVisible();
+      await expect(window.getByRole('region', { name: '会话历史' })).toBeVisible({
+        timeout: 30_000,
+      });
 
       // Sidebar reads lorra.session.list on workspace mount and lists rows
       // by firstMessage. If SDK list/read path is wrong or the

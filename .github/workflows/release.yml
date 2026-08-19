@@ -43,7 +43,10 @@ jobs:
       - name: Create release with installer assets
         uses: softprops/action-gh-release@v2
         with:
+          # Squirrel 安装包实名带前缀(如 "lorra-2.1.0 Setup.exe"),不能写死裸名。
+          # RELEASES 一并附上,Squirrel 自动更新需要它。
           files: |
-            out/make/squirrel.windows/x64/Setup.exe
+            out/make/squirrel.windows/x64/*.exe
             out/make/squirrel.windows/x64/*.nupkg
+            out/make/squirrel.windows/x64/RELEASES
           generate_release_notes: true
