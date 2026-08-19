@@ -4,6 +4,8 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { _electron as electron, expect, test } from '@playwright/test';
 
+import { ensureDesktopViewport } from './desktop-viewport';
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(__dirname, '../..');
 // 每 worker 独立 userData/workspace:CI 默认多 worker 并行,若共用同一目录,
@@ -60,14 +62,7 @@ test.describe('lorra e2e', () => {
     try {
       const window = await app.firstWindow({ timeout: 60_000 });
       await window.waitForLoadState('domcontentloaded');
-      // CI-only 失败诊断:打印 runner 实际视口与 narrow 断点命中情况
-      //(CI e2e 自首跑从未绿过;侧栏 region 全灭疑似视口 <1050px 断点所致)。
-      console.log(
-        'E2E_DIAG viewport=',
-        JSON.stringify(window.viewportSize()),
-        'narrow=',
-        await window.evaluate(() => matchMedia('(max-width: 1050px)').matches),
-      );
+      await ensureDesktopViewport(window);
 
       // 首启选择器已取消:不出现在 DOM 中。
       await expect(window.getByRole('dialog', { name: '选择工作区' })).toHaveCount(0);
@@ -218,7 +213,7 @@ test.describe('lorra e2e', () => {
     try {
       const window = await app.firstWindow({ timeout: 60_000 });
       await window.waitForLoadState('domcontentloaded');
-      await window.setViewportSize({ width: 1200, height: 700 });
+      await ensureDesktopViewport(window);
 
       const fileRow = window.getByRole('treeitem', { name: 'long.md' });
       // 视口从窄切宽触发侧栏重挂载,CI 上可能超默认 5s。
@@ -323,6 +318,7 @@ test.describe('lorra e2e', () => {
 
     const window = await app.firstWindow({ timeout: 60_000 });
     await window.waitForLoadState('domcontentloaded');
+    await ensureDesktopViewport(window);
 
     // Shell regions render whenever a workspace path is set, independent of
     // driver init success (driver failures are caught and logged in main.ts).
@@ -535,6 +531,7 @@ test.describe('lorra e2e', () => {
     try {
       const window = await app.firstWindow({ timeout: 60_000 });
       await window.waitForLoadState('domcontentloaded');
+      await ensureDesktopViewport(window);
       await expect(window.getByRole('region', { name: '会话历史' })).toBeVisible({
         timeout: 30_000,
       });
