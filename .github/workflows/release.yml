@@ -1,0 +1,49 @@
+name: release
+
+# v* tag 触发的发布:验证 + 打包 + 生成附带安装软件与源码的 GitHub Release。
+# - 源码 zip/tar.gz 由 GitHub 对 tag 自动附带,无需打包步骤。
+# - tag 在 lorra-open 打标后单推(sync-public.mjs 头注):public 只收 main +
+#   显式单推的 v* tag,绝不 --all / --mirror / --tags。
+# - e2e 不在此重复:同提交已在 main 的 ci.yml 上验证过,发布只做精简验证。
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Unit + component tests
+        run: npm test
+
+      - name: Package Squirrel installer
+        run: npx electron-forge make
+
+      - name: Create release with installer assets
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            out/make/squirrel.windows/x64/Setup.exe
+            out/make/squirrel.windows/x64/*.nupkg
+          generate_release_notes: true

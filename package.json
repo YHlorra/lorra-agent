@@ -1,7 +1,7 @@
 {
   "name": "lorra",
   "productName": "lorra",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "license": "MIT",
   "type": "module",
   "description": "Personal deep-work desktop workspace",
