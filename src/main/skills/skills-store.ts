@@ -46,15 +46,19 @@ import { lorraConfigDir } from '../pi-sdk-driver/lorra-config-dir';
 export const SYSTEM_MANAGED_SKILL_NAMES = ['memory-maintenance', 'ofk-digest'] as const;
 
 /**
- * 种子文件名集合 = SYSTEM_MANAGED ∪ [daily-review, deep-review]。
- * 复盘/meta 种子自 2026-08-18 起归 lorra 全局库（builtin-skill-seeder），UI 以普通技能
- * 出现（systemManaged=false，可手动触发）；但收集器仍按「lorra 写的种子」跳过（不收集、
- * 不动位置）——与 UI 灰标解耦，收集语义不变。skill-manager 的启停拒绝只认 SYSTEM_MANAGED。
+ * 种子文件名集合 = SYSTEM_MANAGED ∪ [内置技能种子]。
+ * 内置技能自 2026-08-18 起归 lorra 全局库（builtin-skill-seeder，见 builtin-skill-seeds/），
+ * UI 以普通技能出现（systemManaged=false，可手动触发）；但收集器仍按「lorra 写的种子」
+ * 跳过（不收集、不动位置）——与 UI 灰标解耦，收集语义不变。skill-manager 的启停拒绝只认
+ * SYSTEM_MANAGED。
  */
 export const SEED_FILE_SKILL_NAMES = [
   ...SYSTEM_MANAGED_SKILL_NAMES,
   'daily-review',
   'deep-review',
+  'teach',
+  'reference-projects',
+  'find-skills',
 ] as const;
 
 /** 遍历器最大深度（防 symlink 环卡死主进程，design Sec #4）。 */

@@ -26,14 +26,14 @@ import { freshUserData, seedConcept, seedDigest } from './ofk-test-fixtures';
 // 契约:
 // - ReviewRequest 无 modules 无 userPrompt: { kind, dateISO? }（PM 2026-08-08 取消
 // 提示词引导——复盘重点由技能文件承载,用户直接改文件）
-// - 技能文件 <lorraConfigDir>/skills/{daily,deep}-review.md:生成器只「读 + fallback」——
-// 缺失时用内置种子(getBuiltinSkillSeed)兜底,**不写盘**(写盘由启动期 seedBuiltinSkills
-// 负责,write-if-missing);磁盘当前内容为方法论提示,不覆盖。
+// - 技能文件 <lorraConfigDir>/skills/{daily,deep}-review/SKILL.md(目录形):生成器只
+// 「读 + fallback」——缺失时用内置种子(getBuiltinSkillSeed)兜底,**不写盘**(写盘由
+// 启动期 seedBuiltinSkills 负责,write-if-missing);磁盘当前内容为方法论提示,不覆盖。
 // - generateReview(req, deps{ facts, invoke, store, workspacePath })
 
 const SEEDS = fileURLToPath(new URL('../../src/main/skills/builtin-skill-seeds', import.meta.url));
-const DAILY_SEED = path.join(SEEDS, 'daily-review.md');
-const DEEP_SEED = path.join(SEEDS, 'deep-review.md');
+const DAILY_SEED = path.join(SEEDS, 'daily-review', 'SKILL.md');
+const DEEP_SEED = path.join(SEEDS, 'deep-review', 'SKILL.md');
 
 function skillPath(workspace: string, kind: 'daily' | 'weekly'): string {
   return path.join(
@@ -48,7 +48,8 @@ function globalSkillPath(kind: 'daily' | 'weekly'): string {
   return path.join(
     lorraConfigDir(),
     'skills',
-    kind === 'daily' ? 'daily-review.md' : 'deep-review.md',
+    kind === 'daily' ? 'daily-review' : 'deep-review',
+    'SKILL.md',
   );
 }
 
@@ -147,7 +148,7 @@ describe('generateReview（技能文件方法论）', () => {
     expect(existsSync(wsSkill)).toBe(false);
     expect(existsSync(globalSkill)).toBe(false);
     // 兜底内容 = 内置种子: prompt 含种子方法论片段(「全局概览」三层结构指引),
-    // 且与 builtin-skill-seeds/daily-review.md 字节一致(?raw 保真 CRLF)。
+    // 且与 builtin-skill-seeds/daily-review/SKILL.md 字节一致(?raw 保真 CRLF)。
     expect(captured).toContain('全局概览');
     expect(getBuiltinSkillSeed('daily-review')).toBe(readFileSync(DAILY_SEED, 'utf8'));
     expect(meta.kind).toBe('daily');

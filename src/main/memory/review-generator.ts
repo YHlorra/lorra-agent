@@ -37,14 +37,14 @@ export type ModelInvoke = (prompt: string) => Promise<Result<string>>;
 type ReviewSkillName = 'daily-review' | 'deep-review';
 
 /**
- * 复盘技能读取（2026-08-18 起全局路径）：<lorraConfigDir>/skills/<name>.md。
+ * 复盘技能读取（2026-08-19 起目录形全局路径）：<lorraConfigDir>/skills/<name>/SKILL.md。
  * 不再 per-workspace 播种（写盘由启动期 seedBuiltinSkills 负责，write-if-missing）；
  * 此处只「读 + fallback」：文件缺失 → 内置种子兜底（极端情况，正常启动后文件已在）。
  * 错误码 seed-skill-failed（2026-08-17 收敛，与 loadOrSeedSkill 同口径）。
  */
 function loadReviewSkill(name: ReviewSkillName): Result<string> {
   try {
-    const target = path.join(lorraConfigDir(), 'skills', `${name}.md`);
+    const target = path.join(lorraConfigDir(), 'skills', name, 'SKILL.md');
     if (existsSync(target)) return ok(readFileSync(target, 'utf8'));
     return ok(getBuiltinSkillSeed(name) ?? '');
   } catch (cause) {

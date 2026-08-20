@@ -528,6 +528,9 @@ describe('scanSkills：预算', () => {
       'ofk-digest',
       'daily-review',
       'deep-review',
+      'teach',
+      'reference-projects',
+      'find-skills',
     ]);
 
     for (const name of SYSTEM_MANAGED_SKILL_NAMES) {

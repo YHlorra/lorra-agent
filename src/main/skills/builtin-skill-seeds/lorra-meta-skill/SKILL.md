@@ -1,6 +1,6 @@
 ---
 name: lorra-meta-skill
-description: 把工作流/想法/脚本/SOP 收敛成可复用、可验证、可发布的 SKILL，并可用会话记录自我进化技能文本；发布到 GitHub 时从本技能 meta.yaml（标语/作者/主页/赞赏）拷到目标技能，本地使用不强求。
+description: 把工作流/想法/脚本/SOP/聊天记录收敛成可复用、可验证、可发布的 SKILL，并可用会话记录自我进化技能文本。当用户说「造 skill」「创建技能」「把这个流程做成技能」「优化/评估/发布我的技能」时使用；发布到 GitHub 时从本技能 meta.yaml（标语/作者/主页/赞赏）拷到目标技能，本地使用不强求。不处理一次性总结、纯写代码、普通文档整理等非技能化意图。
 ---
 
 # lorra 元技能（lorra-meta-skill）
@@ -76,3 +76,7 @@ branding:
 - 技能正文 ≤15KB，保留原意，进化不劣化已通过的触发案例；
 - 发布前过「品牌 yaml（从本技能拷过去）→ README → 密钥泄露」三查；
 - 全程无品牌硬编码；本技能文件夹的 `meta.yaml` 是发布品牌**唯一真源**，本地使用不依赖它。
+
+---
+
+Copyright (c) 2026 lorra · https://github.com/YHlorra/lorra-agent
